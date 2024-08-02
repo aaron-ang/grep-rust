@@ -9,9 +9,12 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
         return input_line.contains(|c: char| c.is_ascii_digit());
     } else if pattern.contains("\\w") {
         return input_line.contains(|c: char| c.is_alphanumeric());
+    } else if pattern.starts_with("[^") && pattern.ends_with(']') {
+        let neg_chars = &pattern[2..pattern.len() - 1];
+        return input_line.chars().all(|c| !neg_chars.contains(c));
     } else if pattern.starts_with('[') && pattern.ends_with(']') {
-        let chars = pattern[1..pattern.len() - 1].chars().collect::<String>();
-        return input_line.chars().any(|c| chars.contains(c));
+        let pos_chars = &pattern[1..pattern.len() - 1];
+        return input_line.chars().any(|c| pos_chars.contains(c));
     } else {
         panic!("Unhandled pattern: {}", pattern)
     }
