@@ -1,23 +1,120 @@
 use std::env;
 use std::io;
+use std::iter::Peekable;
 use std::process;
+use std::str::Chars;
+
+enum Pattern {
+    Literal(char),
+    Digit,
+    Alphanumeric,
+    Group(bool, String),
+}
+
+fn match_literal(chars: &mut Chars, literal: char) -> bool {
+    let c = chars.next();
+    c.is_some_and(|c| c == literal)
+}
+fn match_digit(chars: &mut Chars) -> bool {
+    let c = chars.next();
+    c.is_some_and(|c| c.is_ascii_digit())
+}
+fn match_alphanumeric(chars: &mut Chars) -> bool {
+    let c = chars.next();
+    c.is_some_and(|c| c.is_alphanumeric())
+}
+fn match_group(chars: &mut Chars, group: &str) -> bool {
+    let c = chars.next();
+    c.is_some_and(|c| group.contains(c))
+}
 
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
-    if pattern.chars().count() == 1 {
-        return input_line.contains(pattern);
-    } else if pattern.contains("\\d") {
-        return input_line.contains(|c: char| c.is_ascii_digit());
-    } else if pattern.contains("\\w") {
-        return input_line.contains(|c: char| c.is_alphanumeric());
-    } else if pattern.starts_with("[^") && pattern.ends_with(']') {
-        let neg_chars = &pattern[2..pattern.len() - 1];
-        return input_line.chars().all(|c| !neg_chars.contains(c));
-    } else if pattern.starts_with('[') && pattern.ends_with(']') {
-        let pos_chars = &pattern[1..pattern.len() - 1];
-        return input_line.chars().any(|c| pos_chars.contains(c));
-    } else {
-        panic!("Unhandled pattern: {}", pattern)
+    let input_line = input_line.trim();
+    let patterns = get_patterns(pattern);
+    'input_line: for i in 0..input_line.len() {
+        let mut input = input_line[i..].chars();
+        for pattern in &patterns {
+            match pattern {
+                Pattern::Literal(l) => {
+                    if !match_literal(&mut input, *l) {
+                        continue 'input_line;
+                    }
+                }
+                Pattern::Digit => {
+                    if !match_digit(&mut input) {
+                        continue 'input_line;
+                    }
+                }
+                Pattern::Alphanumeric => {
+                    if !match_alphanumeric(&mut input) {
+                        continue 'input_line;
+                    }
+                }
+                Pattern::Group(positive, group) => {
+                    if match_group(&mut input, group) != *positive {
+                        continue 'input_line;
+                    }
+                }
+            }
+        }
+        return true;
     }
+    false
+}
+
+fn get_patterns(pattern: &str) -> Vec<Pattern> {
+    let mut patterns = Vec::new();
+    let mut chars = pattern.chars().peekable();
+
+    loop {
+        let c = chars.next();
+        if c.is_none() {
+            break;
+        }
+        let pattern = match c.unwrap() {
+            '\\' => {
+                let c = chars.next();
+                if c.is_none() {
+                    panic!("Expected character after '\\'");
+                }
+                match c.unwrap() {
+                    'd' => Pattern::Digit,
+                    'w' => Pattern::Alphanumeric,
+                    '\\' => Pattern::Literal('\\'),
+                    unknown => panic!("Unknown special character: {}", unknown),
+                }
+            }
+            '[' => {
+                let (is_positive, group) = get_group_pattern(&mut chars);
+                Pattern::Group(is_positive, group)
+            }
+            l => Pattern::Literal(l),
+        };
+        patterns.push(pattern);
+    }
+
+    patterns
+}
+
+fn get_group_pattern(chars: &mut Peekable<Chars>) -> (bool, String) {
+    let mut is_positive = true;
+    let mut group = String::new();
+
+    if chars.peek() == Some(&'^') {
+        is_positive = false;
+        chars.next();
+    }
+
+    while chars.peek() != Some(&']') {
+        let c = chars.next();
+        if c.is_none() {
+            panic!("Expected ']' after group");
+        }
+        group.push(c.unwrap());
+    }
+    chars.next();
+
+    (is_positive, group)
 }
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
