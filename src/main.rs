@@ -4,11 +4,45 @@ use std::iter::Peekable;
 use std::process;
 use std::str::Chars;
 
+#[derive(Debug)]
 enum Pattern {
     Literal(char),
     Digit,
     Alphanumeric,
     Group(bool, String),
+}
+
+fn match_substrings(input_line: &str, patterns: &[Pattern], start: bool) -> bool {
+    let end = if start { 1 } else { input_line.len() };
+    'input_line: for i in 0..end {
+        let mut substring = input_line[i..].chars();
+        for pattern in patterns {
+            match pattern {
+                Pattern::Literal(l) => {
+                    if !match_literal(&mut substring, *l) {
+                        continue 'input_line;
+                    }
+                }
+                Pattern::Digit => {
+                    if !match_digit(&mut substring) {
+                        continue 'input_line;
+                    }
+                }
+                Pattern::Alphanumeric => {
+                    if !match_alphanumeric(&mut substring) {
+                        continue 'input_line;
+                    }
+                }
+                Pattern::Group(positive, group) => {
+                    if match_group(&mut substring, group) != *positive {
+                        continue 'input_line;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+    false
 }
 
 fn match_literal(chars: &mut Chars, literal: char) -> bool {
@@ -28,38 +62,17 @@ fn match_group(chars: &mut Chars, group: &str) -> bool {
     c.is_some_and(|c| group.contains(c))
 }
 
-fn match_pattern(input_line: &str, pattern: &str) -> bool {
+fn match_pattern(input_line: &str, mut pattern: &str) -> bool {
     let input_line = input_line.trim();
-    let patterns = get_patterns(pattern);
-    'input_line: for i in 0..input_line.len() {
-        let mut input = input_line[i..].chars();
-        for pattern in &patterns {
-            match pattern {
-                Pattern::Literal(l) => {
-                    if !match_literal(&mut input, *l) {
-                        continue 'input_line;
-                    }
-                }
-                Pattern::Digit => {
-                    if !match_digit(&mut input) {
-                        continue 'input_line;
-                    }
-                }
-                Pattern::Alphanumeric => {
-                    if !match_alphanumeric(&mut input) {
-                        continue 'input_line;
-                    }
-                }
-                Pattern::Group(positive, group) => {
-                    if match_group(&mut input, group) != *positive {
-                        continue 'input_line;
-                    }
-                }
-            }
+    let start = match pattern.chars().nth(0) {
+        Some(c) if c == '^' => {
+            pattern = &pattern[1..];
+            true
         }
-        return true;
-    }
-    false
+        _ => false,
+    };
+    let patterns = get_patterns(pattern);
+    match_substrings(input_line, &patterns, start)
 }
 
 fn get_patterns(pattern: &str) -> Vec<Pattern> {
