@@ -8,6 +8,7 @@ pub enum Pattern {
     Alphanumeric,
     Group(bool, String),
     OneOrMore(Box<Pattern>),
+    ZeroOrMore(Box<Pattern>),
 }
 
 pub fn get_patterns(regex: &str) -> Vec<Pattern> {
@@ -39,6 +40,10 @@ pub fn get_patterns(regex: &str) -> Vec<Pattern> {
             '+' => {
                 let pattern = patterns.pop().expect("Expected pattern before '+'");
                 Pattern::OneOrMore(Box::new(pattern))
+            }
+            '?' => {
+                let pattern = patterns.pop().expect("Expected pattern before '*'");
+                Pattern::ZeroOrMore(Box::new(pattern))
             }
             l => Pattern::Literal(l),
         };

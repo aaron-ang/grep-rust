@@ -75,19 +75,37 @@ fn match_substrings(
                     }
                 }
                 Pattern::OneOrMore(pattern) => {
-                    let mut substring_copy = String::from_iter(substring_iter);
-                    let first_match = match_pattern(&substring_copy, pattern);
+                    let mut substring = String::from_iter(substring_iter);
+                    let first_match = match_pattern(&substring, pattern);
                     if !first_match {
                         continue 'input_line;
                     }
-
                     let remaining_patterns = pattern_iter.cloned().collect::<Vec<_>>();
+                    // try to continuously reduce substring until it matches
                     loop {
-                        substring_copy = substring_copy[1..].to_string();
-                        if match_substrings(&substring_copy, &remaining_patterns, false, false) {
+                        substring = substring[1..].to_string();
+                        if match_substrings(&substring, &remaining_patterns, false, false) {
                             return true;
                         }
-                        if !match_pattern(&substring_copy, pattern) {
+                        if !match_pattern(&substring, pattern) {
+                            break;
+                        }
+                    }
+                    continue 'input_line;
+                }
+                Pattern::ZeroOrMore(pattern) => {
+                    let mut substring = String::from_iter(substring_iter.clone());
+                    let first_match = match_pattern(&substring, pattern);
+                    if !first_match {
+                        continue;
+                    }
+                    let remaining_patterns = pattern_iter.cloned().collect::<Vec<_>>();
+                    loop {
+                        substring = substring[1..].to_string();
+                        if match_substrings(&substring, &remaining_patterns, false, false) {
+                            return true;
+                        }
+                        if !match_pattern(&substring, pattern) {
                             break;
                         }
                     }
