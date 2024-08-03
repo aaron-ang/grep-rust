@@ -12,9 +12,29 @@ enum Pattern {
     Group(bool, String),
 }
 
-fn match_substrings(input_line: &str, patterns: &[Pattern], start: bool) -> bool {
-    let end = if start { 1 } else { input_line.len() };
-    'input_line: for i in 0..end {
+fn match_substrings(
+    input_line: &str,
+    patterns: &[Pattern],
+    start_anchor: bool,
+    end_anchor: bool,
+) -> bool {
+    let range_start = if end_anchor {
+        if input_line.len() < patterns.len() {
+            return false;
+        }
+        // check last patterns.len() characters of input_line
+        input_line.len() - patterns.len()
+    } else {
+        0
+    };
+    let range_end = if start_anchor {
+        // one iteration
+        1
+    } else {
+        input_line.len()
+    };
+
+    'input_line: for i in range_start..range_end {
         let mut substring = input_line[i..].chars();
         for pattern in patterns {
             match pattern {
@@ -64,15 +84,21 @@ fn match_group(chars: &mut Chars, group: &str) -> bool {
 
 fn match_pattern(input_line: &str, mut pattern: &str) -> bool {
     let input_line = input_line.trim();
-    let start = match pattern.chars().nth(0) {
-        Some(c) if c == '^' => {
-            pattern = &pattern[1..];
+    let start = if pattern.starts_with('^') {
+        pattern = &pattern[1..];
+        true
+    } else {
+        false
+    };
+    let end = match pattern.chars().last() {
+        Some(c) if c == '$' => {
+            pattern = &pattern[..pattern.len() - 1];
             true
         }
         _ => false,
     };
     let patterns = get_patterns(pattern);
-    match_substrings(input_line, &patterns, start)
+    match_substrings(input_line, &patterns, start, end)
 }
 
 fn get_patterns(pattern: &str) -> Vec<Pattern> {
