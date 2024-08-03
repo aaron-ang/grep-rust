@@ -9,6 +9,7 @@ pub enum Pattern {
     Group(bool, String),
     OneOrMore(Box<Pattern>),
     ZeroOrMore(Box<Pattern>),
+    Wildcard,
 }
 
 pub fn get_patterns(regex: &str) -> Vec<Pattern> {
@@ -45,6 +46,7 @@ pub fn get_patterns(regex: &str) -> Vec<Pattern> {
                 let pattern = patterns.pop().expect("Expected pattern before '*'");
                 Pattern::ZeroOrMore(Box::new(pattern))
             }
+            '.' => Pattern::Wildcard,
             l => Pattern::Literal(l),
         };
         patterns.push(pattern);
