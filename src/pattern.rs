@@ -8,13 +8,13 @@ pub enum Pattern {
     Alphanumeric,
     Group(bool, String),
     OneOrMore(Box<Pattern>),
-    ZeroOrMore(Box<Pattern>),
+    ZeroOrOne(Box<Pattern>),
     Wildcard,
     Alternation(Vec<Vec<Pattern>>),
 }
 
 pub fn get_patterns(regex: &str) -> Vec<Pattern> {
-    let mut patterns = Vec::new();
+    let mut patterns: Vec<Pattern> = Vec::new();
     let mut chars = regex.chars().peekable();
 
     loop {
@@ -32,6 +32,15 @@ pub fn get_patterns(regex: &str) -> Vec<Pattern> {
                     'd' => Pattern::Digit,
                     'w' => Pattern::Alphanumeric,
                     '\\' => Pattern::Literal('\\'),
+                    backref if backref.is_ascii_digit() => {
+                        let mut backref = backref.to_digit(10).unwrap();
+                        while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                            let c = chars.next();
+                            backref *= 10;
+                            backref += c.unwrap().to_digit(10).unwrap();
+                        }
+                        find_group(&patterns, backref as usize)
+                    }
                     unknown => panic!("Unknown special character: {}", unknown),
                 }
             }
@@ -44,8 +53,8 @@ pub fn get_patterns(regex: &str) -> Vec<Pattern> {
                 Pattern::OneOrMore(Box::new(pattern))
             }
             '?' => {
-                let pattern = patterns.pop().expect("Expected pattern before '*'");
-                Pattern::ZeroOrMore(Box::new(pattern))
+                let pattern = patterns.pop().expect("Expected pattern before '?'");
+                Pattern::ZeroOrOne(Box::new(pattern))
             }
             '.' => Pattern::Wildcard,
             '(' => {
@@ -58,6 +67,17 @@ pub fn get_patterns(regex: &str) -> Vec<Pattern> {
     }
 
     patterns
+}
+
+fn find_group(patterns: &[Pattern], backref: usize) -> Pattern {
+    let group = patterns
+        .iter()
+        .filter(|p| matches!(p, Pattern::Alternation(_)))
+        .nth(backref - 1);
+    if let Some(group) = group {
+        return group.clone();
+    }
+    panic!("Backreference not found");
 }
 
 fn get_group_pattern(chars: &mut Peekable<Chars>) -> (bool, String) {
@@ -88,7 +108,6 @@ fn get_alternation_pattern(chars: &mut Peekable<Chars>) -> Vec<Vec<Pattern>> {
         if c.is_none() {
             panic!("Expected ')' after alternation");
         }
-
         let mut regex = String::new();
         loop {
             regex.push(c.unwrap());
