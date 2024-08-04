@@ -27,7 +27,7 @@ pub fn match_substrings(
     'input_line: for i in range_start..range_end {
         let mut substring_iter = input_line[i..].chars();
         let mut pattern_iter = patterns.iter();
-        while let Some(pattern) = pattern_iter.next() {
+        'pattern: while let Some(pattern) = pattern_iter.next() {
             match pattern {
                 Pattern::Literal(l) => {
                     if !match_literal(&mut substring_iter, *l) {
@@ -51,12 +51,11 @@ pub fn match_substrings(
                 }
                 Pattern::OneOrMore(pattern) => {
                     let mut substring = String::from_iter(substring_iter);
-                    let first_match = match_pattern(&substring, pattern);
-                    if !first_match {
-                        continue 'input_line;
+                    if !match_pattern(&substring, pattern) {
+                        continue 'input_line; // zero match: go to next input substring
                     }
                     let remaining_patterns = pattern_iter.cloned().collect::<Vec<_>>();
-                    // incrementally match pattern until substring matches
+                    // incrementally match `pattern` until remaining substring matches
                     loop {
                         substring = substring[1..].to_string();
                         if match_substrings(&substring, &remaining_patterns, false, false) {
@@ -70,9 +69,8 @@ pub fn match_substrings(
                 }
                 Pattern::ZeroOrMore(pattern) => {
                     let mut substring = String::from_iter(substring_iter.clone());
-                    let first_match = match_pattern(&substring, pattern);
-                    if !first_match {
-                        continue;
+                    if !match_pattern(&substring, pattern) {
+                        continue; // zero match: go to next pattern
                     }
                     let remaining_patterns = pattern_iter.cloned().collect::<Vec<_>>();
                     loop {
@@ -90,6 +88,21 @@ pub fn match_substrings(
                     if !match_wildcard(&mut substring_iter) {
                         continue 'input_line;
                     }
+                }
+                Pattern::Alternation(alternations) => {
+                    'alt: for alt in alternations {
+                        let mut iter_copy = substring_iter.clone();
+                        for pattern in alt {
+                            let substring = String::from_iter(iter_copy.clone());
+                            if !match_pattern(&substring, pattern) {
+                                continue 'alt;
+                            }
+                            iter_copy.next();
+                        }
+                        substring_iter = iter_copy;
+                        continue 'pattern;
+                    }
+                    continue 'input_line;
                 }
             }
         }

@@ -10,6 +10,7 @@ pub enum Pattern {
     OneOrMore(Box<Pattern>),
     ZeroOrMore(Box<Pattern>),
     Wildcard,
+    Alternation(Vec<Vec<Pattern>>),
 }
 
 pub fn get_patterns(regex: &str) -> Vec<Pattern> {
@@ -47,6 +48,10 @@ pub fn get_patterns(regex: &str) -> Vec<Pattern> {
                 Pattern::ZeroOrMore(Box::new(pattern))
             }
             '.' => Pattern::Wildcard,
+            '(' => {
+                let patterns = get_alternation_pattern(&mut chars);
+                Pattern::Alternation(patterns)
+            }
             l => Pattern::Literal(l),
         };
         patterns.push(pattern);
@@ -74,4 +79,32 @@ fn get_group_pattern(chars: &mut Peekable<Chars>) -> (bool, String) {
     chars.next();
 
     (is_positive, group)
+}
+
+fn get_alternation_pattern(chars: &mut Peekable<Chars>) -> Vec<Vec<Pattern>> {
+    let mut alternation = Vec::new();
+    while chars.peek() != Some(&')') {
+        let mut c = chars.next();
+        if c.is_none() {
+            panic!("Expected ')' after alternation");
+        }
+
+        let mut regex = String::new();
+        loop {
+            regex.push(c.unwrap());
+            if chars.peek() == Some(&')') || chars.peek() == Some(&'|') {
+                break;
+            }
+            c = chars.next();
+        }
+        let patterns = get_patterns(&regex);
+        alternation.push(patterns);
+
+        if chars.peek() == Some(&'|') {
+            chars.next();
+        }
+    }
+    chars.next();
+
+    alternation
 }
