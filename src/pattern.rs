@@ -3,16 +3,21 @@ use std::str::Chars;
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Literal(char),
-    Digit,
-    Alphanumeric,
-    CharGroup(bool, String),
-    OneOrMore(Box<Pattern>),
-    ZeroOrOne(Box<Pattern>),
-    Wildcard,
+    Literal(char, Count),
+    Digit(Count),
+    Alphanumeric(Count),
+    Wildcard(Count),
+    CharGroup(bool, String, Count),
     Alternation(Vec<Vec<Pattern>>),
     CapturedGroup(Vec<Pattern>),
     Backreference(usize),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Count {
+    One,
+    OneOrMore,
+    ZeroOrOne,
 }
 
 pub fn parse(
@@ -35,20 +40,20 @@ pub fn parse(
     }
 
     loop {
-        let c = chars.next();
-        if c.is_none() {
+        let Some(c) = chars.next() else {
             break;
-        }
-        let pattern = match c.unwrap() {
+        };
+        let pattern = match c {
             '\\' => {
                 let c = chars.next();
                 if c.is_none() {
                     panic!("Expected character after '\\'");
                 }
+                let count = parse_count(&mut chars);
                 match c.unwrap() {
-                    'd' => Pattern::Digit,
-                    'w' => Pattern::Alphanumeric,
-                    '\\' => Pattern::Literal('\\'),
+                    'd' => Pattern::Digit(count),
+                    'w' => Pattern::Alphanumeric(count),
+                    '\\' => Pattern::Literal('\\', count),
                     backref if backref.is_ascii_digit() => {
                         let backref = backref.to_digit(10).unwrap();
                         Pattern::Backreference(backref as usize)
@@ -58,17 +63,9 @@ pub fn parse(
             }
             '[' => {
                 let (is_positive, group) = parse_char_group(&mut chars);
-                Pattern::CharGroup(is_positive, group)
+                Pattern::CharGroup(is_positive, group, parse_count(&mut chars))
             }
-            '+' => {
-                let pattern = patterns.pop().expect("Expected pattern before '+'");
-                Pattern::OneOrMore(Box::new(pattern))
-            }
-            '?' => {
-                let pattern = patterns.pop().expect("Expected pattern before '?'");
-                Pattern::ZeroOrOne(Box::new(pattern))
-            }
-            '.' => Pattern::Wildcard,
+            '.' => Pattern::Wildcard(parse_count(&mut chars)),
             '(' => {
                 let mut patterns = parse_alternation(&mut chars);
                 if patterns.len() == 1 {
@@ -77,12 +74,20 @@ pub fn parse(
                     Pattern::Alternation(patterns)
                 }
             }
-            l => Pattern::Literal(l),
+            l => Pattern::Literal(l, parse_count(&mut chars)),
         };
         patterns.push(pattern);
     }
 
     (patterns, start, end)
+}
+
+fn parse_count(pattern: &mut Peekable<Chars>) -> Count {
+    match pattern.next_if(|c| matches!(c, '+' | '?')) {
+        Some('+') => Count::OneOrMore,
+        Some('?') => Count::ZeroOrOne,
+        _ => Count::One,
+    }
 }
 
 fn parse_char_group(chars: &mut Peekable<Chars>) -> (bool, String) {
