@@ -12,12 +12,13 @@ fn match_regex(input_line: &str, regex: &str) -> bool {
     let mut input_line = input_line.trim().chars().peekable();
     let (patterns, start, end) = parse(regex);
     let mut groups = vec![];
+    let mut current_group = String::new();
     println!("{:?}", patterns);
 
     if start {
         if patterns
             .iter()
-            .all(|p| match_substring(&mut input_line, p, &mut groups, None))
+            .all(|p| match_substring(&mut input_line, p, &mut groups, &mut current_group))
         {
             !end || input_line.peek().is_none()
         } else {
@@ -28,16 +29,17 @@ fn match_regex(input_line: &str, regex: &str) -> bool {
             let mut input_start = input_line.clone();
             if patterns
                 .iter()
-                .all(|p| match_substring(&mut input_start, p, &mut groups, None))
+                .all(|p| match_substring(&mut input_start, p, &mut groups, &mut current_group))
             {
                 if !end || input_start.peek().is_none() {
                     return true;
                 }
             }
-            groups.clear();
             if input_line.next().is_none() {
                 return false;
             }
+            current_group.clear();
+            groups.clear();
         }
     }
 }
