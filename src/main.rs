@@ -5,27 +5,41 @@ use std::process;
 mod r#match;
 mod pattern;
 
-use pattern::get_patterns;
-use r#match::match_substrings;
+use pattern::parse;
+use r#match::match_substring;
 
-fn match_regex(input_line: &str, mut regex: &str) -> bool {
-    let input_line = input_line.trim();
-    let start = if regex.starts_with('^') {
-        regex = &regex[1..];
-        true
-    } else {
-        false
-    };
-    let end = match regex.chars().last() {
-        Some(c) if c == '$' => {
-            regex = &regex[..regex.len() - 1];
-            true
-        }
-        _ => false,
-    };
-    let patterns = get_patterns(regex);
+fn match_regex(input_line: &str, regex: &str) -> bool {
+    let mut input_line = input_line.trim().chars().peekable();
+    let (patterns, start, end) = parse(regex);
+    let mut groups = vec![];
     println!("{:?}", patterns);
-    match_substrings(input_line, &patterns, start, end)
+
+    if start {
+        if patterns
+            .iter()
+            .all(|p| match_substring(&mut input_line, p, &mut groups, None))
+        {
+            !end || input_line.peek().is_none()
+        } else {
+            false
+        }
+    } else {
+        loop {
+            let mut input_start = input_line.clone();
+            if patterns
+                .iter()
+                .all(|p| match_substring(&mut input_start, p, &mut groups, None))
+            {
+                if !end || input_start.peek().is_none() {
+                    return true;
+                }
+            }
+            groups.clear();
+            if input_line.next().is_none() {
+                return false;
+            }
+        }
+    }
 }
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>

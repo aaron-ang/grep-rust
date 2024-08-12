@@ -15,9 +15,24 @@ pub enum Pattern {
     Backreference(usize),
 }
 
-pub fn parse(regex: &str) -> Vec<Pattern> {
+pub fn parse(
+    regex: &str,
+) -> (
+    Vec<Pattern>,
+    bool, /* start_anchor */
+    bool, /* end_anchor */
+) {
+    let start = regex.starts_with('^');
+    let end = regex.ends_with('$');
+
     let mut patterns = vec![];
     let mut chars = regex.chars().peekable();
+    if start {
+        chars.next();
+    }
+    if end {
+        chars.next_back();
+    }
 
     loop {
         let c = chars.next();
@@ -67,7 +82,7 @@ pub fn parse(regex: &str) -> Vec<Pattern> {
         patterns.push(pattern);
     }
 
-    patterns
+    (patterns, start, end)
 }
 
 fn parse_char_group(chars: &mut Peekable<Chars>) -> (bool, String) {
@@ -106,7 +121,7 @@ fn parse_alternation(chars: &mut Peekable<Chars>) -> Vec<Vec<Pattern>> {
             }
             c = chars.next();
         }
-        let patterns = parse(&regex);
+        let (patterns, _, _) = parse(&regex);
         alternation.push(patterns);
 
         if chars.peek() == Some(&'|') {
