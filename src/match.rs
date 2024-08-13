@@ -13,9 +13,12 @@ pub fn match_substring(
         Pattern::Digit(count) => {
             match_count(input_line, *count, |c| c.is_ascii_digit(), current_group)
         }
-        Pattern::Alphanumeric(count) => {
-            match_count(input_line, *count, |c| c.is_alphanumeric(), current_group)
-        }
+        Pattern::Alphanumeric(count) => match_count(
+            input_line,
+            *count,
+            |c| c.is_ascii_alphanumeric(),
+            current_group,
+        ),
         Pattern::Wildcard(count) => {
             let restricted_chars = "\\[](|)";
             match_count(
@@ -25,38 +28,48 @@ pub fn match_substring(
                 current_group,
             )
         }
-        Pattern::CharGroup(positive, group, count) => match_count(
+        Pattern::CharGroup(negated, group, count) => match_count(
             input_line,
             *count,
-            |c| group.contains(*c) ^ !positive,
+            |c| c.is_ascii_alphanumeric() && (group.contains(*c) ^ negated),
             current_group,
         ),
-        Pattern::Alternation(alternations) => {
-            let mut current_group = String::new();
-            for alt in alternations {
+        Pattern::Alternation(alternation) => {
+            let mut new_current_group = String::new();
+            for alt in &alternation.alternatives {
                 let mut input_clone = input_line.clone();
                 if alt.iter().all(|pattern| {
                     match_substring(
                         &mut input_clone,
                         pattern,
                         captured_groups,
-                        &mut current_group,
+                        &mut new_current_group,
                     )
                 }) {
-                    captured_groups.push(current_group);
+                    current_group.push_str(&new_current_group);
+                    let i = alternation.idx - 1;
+                    if i >= captured_groups.len() {
+                        captured_groups.resize(i + 1, String::new());
+                    }
+                    captured_groups[i] = new_current_group;
                     *input_line = input_clone;
                     return true;
                 }
-                current_group.clear();
+                new_current_group.clear();
             }
             false
         }
         Pattern::CapturedGroup(group) => {
-            let mut current_group = String::new();
-            if group.iter().all(|pattern| {
-                match_substring(input_line, pattern, captured_groups, &mut current_group)
+            let mut new_current_group = String::new();
+            if group.patterns.iter().all(|pattern| {
+                match_substring(input_line, pattern, captured_groups, &mut new_current_group)
             }) {
-                captured_groups.push(current_group);
+                current_group.push_str(&new_current_group);
+                let i = group.idx - 1;
+                if i >= captured_groups.len() {
+                    captured_groups.resize(i + 1, String::new());
+                }
+                captured_groups[i] = new_current_group;
                 true
             } else {
                 false
@@ -64,7 +77,11 @@ pub fn match_substring(
         }
         Pattern::Backreference(n) => captured_groups.get(*n as usize - 1).is_some_and(|matched| {
             let chars: String = input_line.take(matched.len()).collect();
-            matched == &chars
+            if matched == &chars {
+                current_group.push_str(&chars);
+                return true;
+            }
+            false
         }),
     }
 }
