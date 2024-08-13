@@ -8,8 +8,8 @@ pub enum Pattern {
     Alphanumeric(Count),
     Wildcard(Count),
     CharGroup(bool, String, Count),
-    Alternation(Vec<Vec<Pattern>>),
-    CapturedGroup(Vec<Pattern>),
+    Alternation(Alternation),
+    CapturedGroup(Group),
     Backreference(usize),
 }
 
@@ -20,36 +20,33 @@ pub enum Count {
     ZeroOrOne,
 }
 
-pub fn parse(
-    regex: &str,
-) -> (
-    Vec<Pattern>,
-    bool, /* start_anchor */
-    bool, /* end_anchor */
-) {
-    let start = regex.starts_with('^');
-    let end = regex.ends_with('$');
+#[derive(Debug, Clone)]
+pub struct Alternation {
+    pub idx: usize,
+    pub alternatives: Vec<Vec<Pattern>>,
+}
 
-    let mut patterns = vec![];
-    let mut chars = regex.chars().peekable();
-    if start {
-        chars.next();
-    }
-    if end {
-        chars.next_back();
-    }
+#[derive(Debug, Clone)]
+pub struct Group {
+    pub idx: usize,
+    pub patterns: Vec<Pattern>,
+}
 
-    loop {
-        let Some(c) = chars.next() else {
-            break;
-        };
-        let pattern = match c {
+struct Parser {
+    group_idx: usize,
+    nesting: usize,
+}
+
+impl Parser {
+    fn parse(&mut self, chars: &mut Peekable<Chars>) -> Pattern {
+        let c = chars.next().unwrap();
+        match c {
             '\\' => {
                 let c = chars.next();
                 if c.is_none() {
                     panic!("Expected character after '\\'");
                 }
-                let count = parse_count(&mut chars);
+                let count = Parser::parse_count(chars);
                 match c.unwrap() {
                     'd' => Pattern::Digit(count),
                     'w' => Pattern::Alphanumeric(count),
@@ -62,78 +59,130 @@ pub fn parse(
                 }
             }
             '[' => {
-                let (is_positive, group) = parse_char_group(&mut chars);
-                Pattern::CharGroup(is_positive, group, parse_count(&mut chars))
+                let (negated, group) = Parser::parse_char_group(chars);
+                Pattern::CharGroup(negated, group, Parser::parse_count(chars))
             }
-            '.' => Pattern::Wildcard(parse_count(&mut chars)),
+            '.' => Pattern::Wildcard(Parser::parse_count(chars)),
             '(' => {
-                let mut patterns = parse_alternation(&mut chars);
+                let (idx, mut patterns) = self.parse_alternation(chars);
                 if patterns.len() == 1 {
-                    Pattern::CapturedGroup(patterns.pop().unwrap())
+                    Pattern::CapturedGroup(Group {
+                        idx,
+                        patterns: patterns.pop().unwrap(),
+                    })
                 } else {
-                    Pattern::Alternation(patterns)
+                    Pattern::Alternation(Alternation {
+                        idx,
+                        alternatives: patterns,
+                    })
                 }
             }
-            l => Pattern::Literal(l, parse_count(&mut chars)),
-        };
-        patterns.push(pattern);
+            l => Pattern::Literal(l, Parser::parse_count(chars)),
+        }
+    }
+    fn parse_count(pattern: &mut Peekable<Chars>) -> Count {
+        match pattern.next_if(|c| matches!(c, '+' | '?')) {
+            Some('+') => Count::OneOrMore,
+            Some('?') => Count::ZeroOrOne,
+            _ => Count::One,
+        }
+    }
+    fn parse_char_group(chars: &mut Peekable<Chars>) -> (bool, String) {
+        let negated = chars.peek() == Some(&'^');
+        if negated {
+            chars.next();
+        }
+        let mut group = String::new();
+        loop {
+            match chars.next() {
+                None => panic!("Expected ']' after group"),
+                Some(']') => break,
+                Some(c) if c.is_ascii_alphanumeric() => group.push(c),
+                Some(_) => panic!("Expected alphanumeric character in group"),
+            }
+        }
+        (negated, group)
+    }
+    fn parse_alternation(&mut self, chars: &mut Peekable<Chars>) -> (usize, Vec<Vec<Pattern>>) {
+        let mut alternation = vec![];
+        let mut group_chars = String::new();
+        let mut num_open_parens = 0;
+        self.nesting += 1;
+        self.group_idx += 1;
+        let idx = self.group_idx;
+        loop {
+            match chars.next() {
+                None => panic!("Expected ')' after alternation"),
+                Some('(') => {
+                    num_open_parens += 1;
+                    group_chars.push('(');
+                }
+                Some(')') => {
+                    if num_open_parens == 0 {
+                        alternation
+                            .push(self.read_group_items(&mut group_chars.chars().peekable()));
+                        break;
+                    } else {
+                        num_open_parens -= 1;
+                        group_chars.push(')');
+                    }
+                }
+                Some('|') => {
+                    if num_open_parens == 0 {
+                        alternation
+                            .push(self.read_group_items(&mut group_chars.chars().peekable()));
+                        group_chars.clear();
+                    } else {
+                        group_chars.push('|');
+                    }
+                }
+                Some(c) => group_chars.push(c),
+            }
+        }
+        self.nesting -= 1;
+        (idx, alternation)
+    }
+    fn read_group_items(&mut self, pattern: &mut Peekable<Chars>) -> Vec<Pattern> {
+        let mut items = vec![];
+        loop {
+            if pattern.peek().is_none() {
+                break;
+            }
+            items.push(self.parse(pattern))
+        }
+        items
+    }
+}
+
+pub fn parse(
+    regex: &str,
+) -> (
+    Vec<Pattern>,
+    bool, /* start_anchor */
+    bool, /* end_anchor */
+) {
+    let start = regex.starts_with('^');
+    let end = regex.ends_with('$');
+    let mut chars = regex.chars().peekable();
+
+    if start {
+        chars.next();
+    }
+    if end {
+        chars.next_back();
+    }
+
+    let mut parser = Parser {
+        group_idx: 0,
+        nesting: 0,
+    };
+    let mut patterns = vec![];
+    loop {
+        if chars.peek().is_none() {
+            break;
+        }
+        patterns.push(parser.parse(&mut chars));
     }
 
     (patterns, start, end)
-}
-
-fn parse_count(pattern: &mut Peekable<Chars>) -> Count {
-    match pattern.next_if(|c| matches!(c, '+' | '?')) {
-        Some('+') => Count::OneOrMore,
-        Some('?') => Count::ZeroOrOne,
-        _ => Count::One,
-    }
-}
-
-fn parse_char_group(chars: &mut Peekable<Chars>) -> (bool, String) {
-    let mut is_positive = true;
-    let mut group = String::new();
-
-    if chars.peek() == Some(&'^') {
-        is_positive = false;
-        chars.next();
-    }
-
-    while chars.peek() != Some(&']') {
-        let c = chars.next();
-        if c.is_none() {
-            panic!("Expected ']' after group");
-        }
-        group.push(c.unwrap());
-    }
-    chars.next();
-
-    (is_positive, group)
-}
-
-fn parse_alternation(chars: &mut Peekable<Chars>) -> Vec<Vec<Pattern>> {
-    let mut alternation = Vec::new();
-    while chars.peek() != Some(&')') {
-        let mut c = chars.next();
-        if c.is_none() {
-            panic!("Expected ')' after alternation");
-        }
-        let mut regex = String::new();
-        loop {
-            regex.push(c.unwrap());
-            if chars.peek() == Some(&')') || chars.peek() == Some(&'|') {
-                break;
-            }
-            c = chars.next();
-        }
-        let (patterns, _, _) = parse(&regex);
-        alternation.push(patterns);
-
-        if chars.peek() == Some(&'|') {
-            chars.next();
-        }
-    }
-    chars.next();
-
-    alternation
 }
