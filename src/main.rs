@@ -5,24 +5,28 @@ use std::process;
 mod r#match;
 mod pattern;
 
+use colored::Colorize;
 use pattern::parse;
 use r#match::match_substring;
 
-fn match_regex(input_line: &str, regex: &str) -> bool {
+fn match_regex(input_line: &str, regex: &str) -> Option<String> {
     let mut input_line = input_line.trim().chars().peekable();
     let (patterns, start, end) = parse(regex);
     let mut groups = vec![];
     let mut current_group = String::new();
-    println!("{:?}", patterns);
 
     if start {
         if patterns
             .iter()
             .all(|p| match_substring(&mut input_line, p, &mut groups, &mut current_group))
         {
-            !end || input_line.peek().is_none()
+            if !end || input_line.peek().is_none() {
+                Some(current_group)
+            } else {
+                None
+            }
         } else {
-            false
+            None
         }
     } else {
         loop {
@@ -32,11 +36,13 @@ fn match_regex(input_line: &str, regex: &str) -> bool {
                 .all(|p| match_substring(&mut input_start, p, &mut groups, &mut current_group))
             {
                 if !end || input_start.peek().is_none() {
-                    return true;
+                    return Some(current_group);
+                } else {
+                    return None;
                 }
             }
             if input_line.next().is_none() {
-                return false;
+                return None;
             }
             current_group.clear();
             groups.clear();
@@ -47,7 +53,7 @@ fn match_regex(input_line: &str, regex: &str) -> bool {
 // Usage: echo <input_text> | your_program.sh -E <pattern>
 fn main() {
     if env::args().nth(1).unwrap() != "-E" {
-        println!("Expected first argument to be '-E'");
+        eprintln!("Expected first argument to be '-E'");
         process::exit(1);
     }
 
@@ -56,7 +62,8 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    if match_regex(&input_line, &pattern) {
+    if let Some(group) = match_regex(&input_line, &pattern) {
+        println!("{}", group.bright_red().bold());
         process::exit(0)
     } else {
         process::exit(1)
