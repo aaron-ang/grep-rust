@@ -63,7 +63,14 @@ fn main() {
     io::stdin().read_line(&mut input_line).unwrap();
 
     if let Some(group) = match_regex(&input_line, &pattern) {
-        println!("{}", group.bright_red().bold());
+        let i = input_line.find(&group).unwrap();
+        let j = i + group.len();
+        print!(
+            "{}{}{}",
+            input_line[..i].normal(),
+            input_line[i..j].bright_red().bold(),
+            input_line[j..].normal()
+        );
         process::exit(0)
     } else {
         process::exit(1)
