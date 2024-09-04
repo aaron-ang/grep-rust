@@ -41,45 +41,32 @@ impl Parser {
     fn parse(&mut self, chars: &mut Peekable<Chars>) -> Pattern {
         let c = chars.next().unwrap();
         match c {
-            '\\' => {
-                let c = chars.next();
-                if c.is_none() {
-                    panic!("Expected character after '\\'");
-                }
-                let count = Parser::parse_count(chars);
-                match c.unwrap() {
-                    'd' => Pattern::Digit(count),
-                    'w' => Pattern::Alphanumeric(count),
-                    '\\' => Pattern::Literal('\\', count),
-                    backref if backref.is_ascii_digit() => {
-                        let backref = backref.to_digit(10).unwrap();
-                        Pattern::Backreference(backref as usize)
-                    }
-                    unknown => panic!("Unknown special character: {}", unknown),
-                }
-            }
+            '\\' => Parser::parse_escape(chars),
             '[' => {
                 let (negated, group) = Parser::parse_char_group(chars);
                 Pattern::CharGroup(negated, group, Parser::parse_count(chars))
             }
             '.' => Pattern::Wildcard(Parser::parse_count(chars)),
-            '(' => {
-                let (idx, mut patterns) = self.parse_alternation(chars);
-                if patterns.len() == 1 {
-                    Pattern::CapturedGroup(Group {
-                        idx,
-                        patterns: patterns.pop().unwrap(),
-                    })
-                } else {
-                    Pattern::Alternation(Alternation {
-                        idx,
-                        alternatives: patterns,
-                    })
-                }
-            }
+            '(' => self.parse_group(chars),
             l => Pattern::Literal(l, Parser::parse_count(chars)),
         }
     }
+
+    fn parse_escape(chars: &mut Peekable<Chars>) -> Pattern {
+        let c = chars.next().expect("Expected character after '\\'");
+        let count = Parser::parse_count(chars);
+        match c {
+            'd' => Pattern::Digit(count),
+            'w' => Pattern::Alphanumeric(count),
+            '\\' => Pattern::Literal('\\', count),
+            backref if backref.is_ascii_digit() => {
+                let backref = backref.to_digit(10).unwrap();
+                Pattern::Backreference(backref as usize)
+            }
+            unknown => panic!("Unknown special character: {}", unknown),
+        }
+    }
+
     fn parse_count(pattern: &mut Peekable<Chars>) -> Count {
         match pattern.next_if(|c| matches!(c, '+' | '?')) {
             Some('+') => Count::OneOrMore,
@@ -87,6 +74,7 @@ impl Parser {
             _ => Count::One,
         }
     }
+
     fn parse_char_group(chars: &mut Peekable<Chars>) -> (bool, String) {
         let negated = chars.peek() == Some(&'^');
         if negated {
@@ -103,6 +91,22 @@ impl Parser {
         }
         (negated, group)
     }
+
+    fn parse_group(&mut self, chars: &mut Peekable<Chars>) -> Pattern {
+        let (idx, mut patterns) = self.parse_alternation(chars);
+        if patterns.len() == 1 {
+            Pattern::CapturedGroup(Group {
+                idx,
+                patterns: patterns.pop().unwrap(),
+            })
+        } else {
+            Pattern::Alternation(Alternation {
+                idx,
+                alternatives: patterns,
+            })
+        }
+    }
+
     fn parse_alternation(&mut self, chars: &mut Peekable<Chars>) -> (usize, Vec<Vec<Pattern>>) {
         let mut alternation = vec![];
         let mut group_chars = String::new();
@@ -142,12 +146,10 @@ impl Parser {
         self.nesting -= 1;
         (idx, alternation)
     }
+
     fn read_group_items(&mut self, pattern: &mut Peekable<Chars>) -> Vec<Pattern> {
         let mut items = vec![];
-        loop {
-            if pattern.peek().is_none() {
-                break;
-            }
+        while let Some(_) = pattern.peek() {
             items.push(self.parse(pattern))
         }
         items
@@ -177,10 +179,7 @@ pub fn parse(
         nesting: 0,
     };
     let mut patterns = vec![];
-    loop {
-        if chars.peek().is_none() {
-            break;
-        }
+    while let Some(_) = chars.peek() {
         patterns.push(parser.parse(&mut chars));
     }
 
