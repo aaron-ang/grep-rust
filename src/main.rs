@@ -10,7 +10,6 @@ use colored::Colorize;
 
 use grep_starter_rust::match_regex;
 
-// Usage: echo <input_text> | your_program.sh -E <pattern> <file_name>
 fn main() -> Result<()> {
     let mut args = env::args().skip(1);
 
@@ -23,28 +22,40 @@ fn main() -> Result<()> {
         .next()
         .ok_or_else(|| anyhow!("Expected second argument to be a pattern"))?;
 
-    let mut input_line = String::new();
-    match args.next() {
-        Some(file_name) => {
-            let file = File::open(file_name)?;
-            BufReader::new(file).read_line(&mut input_line)?;
+    fn process_lines<R: BufRead>(reader: R, pattern: &str) -> Result<usize> {
+        let mut match_count = 0;
+        for line in reader.lines() {
+            let line = line?;
+            if let Some(matched) = match_regex(&line, pattern) {
+                match_count += 1;
+                if let Some(start) = line.find(&matched) {
+                    let end = start + matched.len();
+                    println!(
+                        "{}{}{}",
+                        line[..start].normal(),
+                        line[start..end].bright_red().bold(),
+                        line[end..].normal()
+                    );
+                } else {
+                    println!("{}", line);
+                }
+            }
         }
-        None => {
-            io::stdin().read_line(&mut input_line)?;
-        }
+        Ok(match_count)
     }
 
-    if let Some(matched) = match_regex(&input_line, &pattern) {
-        if let Some(start) = input_line.find(&matched) {
-            let end = start + matched.len();
-            print!(
-                "{}{}{}",
-                input_line[..start].normal(),
-                input_line[start..end].bright_red().bold(),
-                input_line[end..].normal()
-            );
-            process::exit(0);
+    let match_count = match args.next() {
+        Some(file_name) => {
+            let file = File::open(file_name)?;
+            let reader = BufReader::new(file);
+            process_lines(reader, &pattern)?
         }
-    }
-    process::exit(1);
+        None => {
+            let stdin = io::stdin();
+            let reader = BufReader::new(stdin.lock());
+            process_lines(reader, &pattern)?
+        }
+    };
+
+    process::exit(if match_count > 0 { 0 } else { 1 });
 }
