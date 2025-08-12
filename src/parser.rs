@@ -75,11 +75,13 @@ impl Parser {
             Pattern::CapturedGroup(Group {
                 idx,
                 patterns: patterns.pop().unwrap(),
+                count: Parser::parse_count(chars),
             })
         } else {
             Pattern::Alternation(Alternation {
                 idx,
                 alternatives: patterns,
+                count: Parser::parse_count(chars),
             })
         }
     }
@@ -126,7 +128,7 @@ impl Parser {
 
     fn read_group_items(&mut self, pattern: &mut Peekable<Chars>) -> Vec<Pattern> {
         let mut items = vec![];
-        while let Some(_) = pattern.peek() {
+        while pattern.peek().is_some() {
             items.push(self.parse(pattern))
         }
         items

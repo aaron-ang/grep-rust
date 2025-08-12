@@ -2,6 +2,27 @@
 use super::*;
 
 #[test]
+fn alphanumeric() {
+    assert_eq!(match_regex("÷%+_#×+", r"\w"), Some("_".to_string()));
+}
+
+#[test]
+fn one_or_more() {
+    assert_eq!(match_regex("caaats", r"ca+at"), Some("caaat".to_string()));
+}
+
+#[test]
+fn alternation() {
+    assert_eq!(
+        match_regex(
+            "I see 1 cat, 2 dogs and 3 cows",
+            r"^I see (\d (cat|dog|cow)s?(, | and )?)+$"
+        ),
+        Some("I see 1 cat, 2 dogs and 3 cows".to_string())
+    );
+}
+
+#[test]
 fn nested_backreferences_literal() {
     assert_eq!(
         match_regex(
