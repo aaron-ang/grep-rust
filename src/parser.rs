@@ -40,7 +40,7 @@ impl Parser {
                 let backref = backref.to_digit(10).unwrap();
                 Pattern::Backreference(backref as usize)
             }
-            unknown => panic!("Unknown special character: {}", unknown),
+            unknown => panic!("Unknown special character: {unknown}"),
         }
     }
 

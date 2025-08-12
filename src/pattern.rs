@@ -43,10 +43,10 @@ pub fn match_regex(input_line: &str, regex: &str) -> Option<String> {
         let mut input_chars = input.chars().peekable();
         let mut groups = Vec::new();
         let mut matched = String::new();
-        if match_sequence(&mut input_chars, &patterns, &mut groups, &mut matched) {
-            if !end_anchor || input_chars.peek().is_none() {
-                return Some(matched);
-            }
+        if match_sequence(&mut input_chars, &patterns, &mut groups, &mut matched)
+            && (!end_anchor || input_chars.peek().is_none())
+        {
+            return Some(matched);
         }
         None
     };
@@ -273,9 +273,9 @@ fn try_group_like(
         let mut after_acc = matched_acc.clone();
         let mut after_groups = captured_groups.clone();
 
-        for i in 0..k {
-            after_acc.push_str(&run_matches[i].0);
-            after_groups = run_matches[i].1.clone();
+        for run_match in run_matches.iter().take(k) {
+            after_acc.push_str(&run_match.0);
+            after_groups = run_match.1.clone();
         }
 
         if match_sequence(&mut after_input, rest, &mut after_groups, &mut after_acc) {

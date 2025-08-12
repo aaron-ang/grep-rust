@@ -22,39 +22,55 @@ fn main() -> Result<()> {
         .next()
         .ok_or_else(|| anyhow!("Expected second argument to be a pattern"))?;
 
-    fn process_lines<R: BufRead>(reader: R, pattern: &str) -> Result<usize> {
+    fn process_lines<R: BufRead>(
+        reader: R,
+        pattern: &str,
+        filename_prefix: Option<&str>,
+    ) -> Result<usize> {
         let mut match_count = 0;
+        let prefix = filename_prefix.map(|s| format!("{s}:")).unwrap_or_default();
+
         for line in reader.lines() {
             let line = line?;
             if let Some(matched) = match_regex(&line, pattern) {
                 match_count += 1;
-                if let Some(start) = line.find(&matched) {
-                    let end = start + matched.len();
-                    println!(
-                        "{}{}{}",
-                        line[..start].normal(),
-                        line[start..end].bright_red().bold(),
-                        line[end..].normal()
-                    );
-                } else {
-                    println!("{}", line);
-                }
+
+                let output = match line.find(&matched) {
+                    Some(start) => {
+                        let end = start + matched.len();
+                        format!(
+                            "{}{}{}{}",
+                            prefix,
+                            &line[..start],
+                            &line[start..end].bright_red().bold(),
+                            &line[end..]
+                        )
+                    }
+                    None => format!("{prefix}{line}"),
+                };
+
+                println!("{output}");
             }
         }
+
         Ok(match_count)
     }
 
-    let match_count = match args.next() {
-        Some(file_name) => {
-            let file = File::open(file_name)?;
+    let files = args.collect::<Vec<_>>();
+    let match_count = if files.is_empty() {
+        let stdin = io::stdin();
+        let reader = BufReader::new(stdin.lock());
+        process_lines(reader, &pattern, None)?
+    } else {
+        let mut total = 0;
+        let show_prefix = files.len() > 1;
+        for file_name in files {
+            let file = File::open(&file_name)?;
             let reader = BufReader::new(file);
-            process_lines(reader, &pattern)?
+            let prefix = show_prefix.then_some(file_name.as_str());
+            total += process_lines(reader, &pattern, prefix)?;
         }
-        None => {
-            let stdin = io::stdin();
-            let reader = BufReader::new(stdin.lock());
-            process_lines(reader, &pattern)?
-        }
+        total
     };
 
     process::exit(if match_count > 0 { 0 } else { 1 });
