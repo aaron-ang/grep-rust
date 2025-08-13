@@ -4,15 +4,11 @@ use crate::pattern::{Alternation, Count, Group, Pattern};
 
 pub struct Parser {
     group_idx: usize,
-    nesting: usize,
 }
 
 impl Parser {
     pub fn new() -> Self {
-        Self {
-            group_idx: 0,
-            nesting: 0,
-        }
+        Self { group_idx: 0 }
     }
 
     pub fn parse(&mut self, chars: &mut Peekable<Chars>) -> Pattern {
@@ -33,13 +29,14 @@ impl Parser {
         let c = chars.next().expect("Expected character after '\\'");
         let count = Parser::parse_count(chars);
         match c {
+            // Classes
             'd' => Pattern::Digit(count),
             'w' => Pattern::Alphanumeric(count),
+            // Escaped backslash
             '\\' => Pattern::Literal('\\', count),
-            backref if backref.is_ascii_digit() => {
-                let backref = backref.to_digit(10).unwrap();
-                Pattern::Backreference(backref as usize)
-            }
+            // Backreferences
+            c if c.is_ascii_digit() => Pattern::Backreference(c.to_digit(10).unwrap() as usize),
+            // Unsupported characters
             unknown => panic!("Unknown special character: {unknown}"),
         }
     }
@@ -90,39 +87,35 @@ impl Parser {
         let mut alternation = vec![];
         let mut group_chars = String::new();
         let mut num_open_parens = 0;
-        self.nesting += 1;
-        self.group_idx += 1;
         let idx = self.group_idx;
+        self.group_idx += 1;
         loop {
             match chars.next() {
                 None => panic!("Expected ')' after alternation"),
-                Some('(') => {
-                    num_open_parens += 1;
-                    group_chars.push('(');
-                }
-                Some(')') => {
-                    if num_open_parens == 0 {
-                        alternation
-                            .push(self.read_group_items(&mut group_chars.chars().peekable()));
-                        break;
-                    } else {
-                        num_open_parens -= 1;
-                        group_chars.push(')');
+                Some(c) => match c {
+                    '(' => {
+                        num_open_parens += 1;
+                        group_chars.push('(');
                     }
-                }
-                Some('|') => {
-                    if num_open_parens == 0 {
+                    ')' => {
+                        if num_open_parens == 0 {
+                            alternation
+                                .push(self.read_group_items(&mut group_chars.chars().peekable()));
+                            break;
+                        } else {
+                            num_open_parens -= 1;
+                            group_chars.push(')');
+                        }
+                    }
+                    '|' if num_open_parens == 0 => {
                         alternation
                             .push(self.read_group_items(&mut group_chars.chars().peekable()));
                         group_chars.clear();
-                    } else {
-                        group_chars.push('|');
                     }
-                }
-                Some(c) => group_chars.push(c),
+                    _ => group_chars.push(c),
+                },
             }
         }
-        self.nesting -= 1;
         (idx, alternation)
     }
 
