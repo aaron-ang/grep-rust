@@ -169,27 +169,12 @@ fn is_alnum_or_underscore(c: &char) -> bool {
 }
 
 fn is_unrestricted_char(c: &char) -> bool {
-    !"\\[](|)".contains(*c)
+    let metachars = "\\[](|)";
+    !metachars.contains(*c)
 }
 
 fn is_char_in_group(c: &char, negated: bool, group: &str) -> bool {
     c.is_ascii_alphanumeric() && (group.contains(*c) ^ negated)
-}
-
-/// Like Peekable::next_if but for `Chars`, using a clone to peek the next char
-fn next_if_matches<'a, P>(it: &mut Chars<'a>, pred: &P) -> Option<char>
-where
-    P: Fn(&char) -> bool,
-{
-    let mut peek = it.clone();
-    if let Some(c) = peek.next() {
-        if pred(&c) {
-            // advance the real iterator
-            it.next();
-            return Some(c);
-        }
-    }
-    None
 }
 
 /// Represents a candidate match attempt with its associated state at a point in the input
@@ -251,12 +236,7 @@ fn try_quantified<'a>(
     rest: &[Pattern],
 ) -> bool {
     // Greedily determine the maximum times the predicate matches from the current position
-    let mut greedy_input = input.clone();
-    let mut max = 0;
-    while next_if_matches(&mut greedy_input, &pred).is_some() {
-        max += 1;
-    }
-
+    let max = input.clone().take_while(|c| pred(c)).count();
     let groups_clone = captured_groups.clone();
     try_repetitions(
         input,
@@ -266,20 +246,16 @@ fn try_quantified<'a>(
         matched_acc,
         rest,
         |base_input, n| {
-            // Build a candidate by consuming exactly n predicate-matching characters
-            let before = base_input.as_str();
             let mut local_input = base_input.clone();
-            for _ in 0..n {
-                if next_if_matches(&mut local_input, &pred).is_none() {
-                    return None; // Not enough matches available
+            let before = local_input.as_str();
+            local_input.by_ref().take(n).all(|c| pred(&c)).then(|| {
+                let after = local_input.as_str();
+                let matched = &before[..before.len() - after.len()];
+                MatchCandidate {
+                    input: local_input,
+                    matched,
+                    groups: groups_clone.clone(),
                 }
-            }
-            let after = local_input.as_str();
-            let matched_slice = &before[..before.len() - after.len()];
-            Some(MatchCandidate {
-                input: local_input,
-                matched: matched_slice,
-                groups: groups_clone.clone(),
             })
         },
     )
@@ -464,20 +440,13 @@ fn match_backreference<'a>(
     captured_groups: &[&'a str],
     matched_acc: &mut String,
 ) -> bool {
-    let idx = n.saturating_sub(1);
-    if let Some(expected) = captured_groups.get(idx) {
-        let mut local_input = input.clone();
-        if local_input.as_str().starts_with(expected) {
-            for ch in expected.chars() {
-                if next_if_matches(&mut local_input, &|x| *x == ch).is_none() {
-                    return false;
-                }
-            }
-            *input = local_input;
-            matched_acc.push_str(expected);
-            return true;
-        }
+    let Some(expected) = captured_groups.get(n.saturating_sub(1)) else {
+        return false;
+    };
+    if !input.as_str().starts_with(expected) {
         return false;
     }
-    false
+    input.nth(expected.len().saturating_sub(1));
+    matched_acc.push_str(expected);
+    true
 }
