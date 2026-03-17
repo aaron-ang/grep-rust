@@ -91,39 +91,79 @@ impl Pattern {
 
     fn has_greedy_quantifier(&self) -> bool {
         match self {
-            Pattern::Literal(_, count) => matches!(
-                count,
-                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
-            ),
-            Pattern::Digit(count) => matches!(
-                count,
-                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
-            ),
-            Pattern::Alphanumeric(count) => matches!(
-                count,
-                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
-            ),
-            Pattern::Wildcard(count) => matches!(
-                count,
-                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
-            ),
-            Pattern::CharGroup(_, _, count) => {
-                matches!(
-                    count,
-                    Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
-                )
-            }
-            Pattern::Alternation(alt) => matches!(
-                alt.count,
-                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
-            ),
-            Pattern::CapturedGroup(group) => {
-                matches!(
-                    group.count,
-                    Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
-                )
-            }
+            Pattern::Literal(_, count) => count.is_greedy(),
+            Pattern::Digit(count) => count.is_greedy(),
+            Pattern::Alphanumeric(count) => count.is_greedy(),
+            Pattern::Wildcard(count) => count.is_greedy(),
+            Pattern::CharGroup(_, _, count) => count.is_greedy(),
+            Pattern::Alternation(alt) => alt.count.is_greedy(),
+            Pattern::CapturedGroup(group) => group.count.is_greedy(),
             Pattern::Backreference(_) => false,
+        }
+    }
+
+    fn is_bounded_range(&self) -> bool {
+        matches!(
+            self,
+            Pattern::Literal(_, Count::Range(_, _))
+                | Pattern::Digit(Count::Range(_, _))
+                | Pattern::Alphanumeric(Count::Range(_, _))
+                | Pattern::Wildcard(Count::Range(_, _))
+                | Pattern::CharGroup(_, _, Count::Range(_, _))
+                | Pattern::Alternation(Alternation {
+                    count: Count::Range(_, _),
+                    ..
+                })
+                | Pattern::CapturedGroup(Group {
+                    count: Count::Range(_, _),
+                    ..
+                })
+        )
+    }
+
+    fn repetition_bounds(&self) -> Option<(usize, Option<usize>)> {
+        let count = match self {
+            Pattern::Literal(_, count)
+            | Pattern::Digit(count)
+            | Pattern::Alphanumeric(count)
+            | Pattern::Wildcard(count)
+            | Pattern::CharGroup(_, _, count) => *count,
+            Pattern::Alternation(alternation) => alternation.count,
+            Pattern::CapturedGroup(group) => group.count,
+            Pattern::Backreference(_) => return None,
+        };
+
+        match count {
+            Count::One => None,
+            Count::OneOrMore => Some((1, None)),
+            Count::ZeroOrOne => Some((0, Some(1))),
+            Count::ZeroOrMore => Some((0, None)),
+            Count::Exact(_) => None,
+            Count::AtLeast(min) => Some((min, None)),
+            Count::Range(min, max) => Some((min, Some(max))),
+        }
+    }
+
+    fn as_single_match(&self) -> Pattern {
+        match self {
+            Pattern::Literal(ch, _) => Pattern::Literal(*ch, Count::One),
+            Pattern::Digit(_) => Pattern::Digit(Count::One),
+            Pattern::Alphanumeric(_) => Pattern::Alphanumeric(Count::One),
+            Pattern::Wildcard(_) => Pattern::Wildcard(Count::One),
+            Pattern::CharGroup(negated, group, _) => {
+                Pattern::CharGroup(*negated, group.clone(), Count::One)
+            }
+            Pattern::Alternation(alternation) => Pattern::Alternation(Alternation {
+                idx: alternation.idx,
+                alternatives: alternation.alternatives.clone(),
+                count: Count::One,
+            }),
+            Pattern::CapturedGroup(group) => Pattern::CapturedGroup(Group {
+                idx: group.idx,
+                patterns: group.patterns.clone(),
+                count: Count::One,
+            }),
+            Pattern::Backreference(n) => Pattern::Backreference(*n),
         }
     }
 }
@@ -136,9 +176,17 @@ pub enum Count {
     ZeroOrMore,
     Exact(usize),
     AtLeast(usize),
+    Range(usize, usize),
 }
 
 impl Count {
+    fn is_greedy(self) -> bool {
+        matches!(
+            self,
+            Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_) | Count::Range(_, _)
+        )
+    }
+
     fn match_count(
         self,
         input_line: &mut Peekable<Chars>,
@@ -191,6 +239,72 @@ impl Count {
                 }
                 true
             }
+            Self::Range(min, max) => {
+                for _ in 0..min {
+                    let Some(c) = input_line.next_if(&pred) else {
+                        return false;
+                    };
+                    current_group.push(c);
+                }
+                for _ in min..max {
+                    let Some(c) = input_line.next_if(&pred) else {
+                        break;
+                    };
+                    current_group.push(c);
+                }
+                true
+            }
+        }
+    }
+
+    fn match_repeated(self, mut match_once: impl FnMut() -> bool) -> bool {
+        match self {
+            Self::One => match_once(),
+            Self::OneOrMore => {
+                let mut matched = false;
+                while match_once() {
+                    matched = true;
+                }
+                matched
+            }
+            Self::ZeroOrOne => {
+                match_once();
+                true
+            }
+            Self::ZeroOrMore => {
+                while match_once() {}
+                true
+            }
+            Self::Exact(n) => {
+                for _ in 0..n {
+                    if !match_once() {
+                        return false;
+                    }
+                }
+                true
+            }
+            Self::AtLeast(n) => {
+                for _ in 0..n {
+                    if !match_once() {
+                        return false;
+                    }
+                }
+                while match_once() {}
+                true
+            }
+            Self::Range(min, max) => {
+                for _ in 0..min {
+                    if !match_once() {
+                        return false;
+                    }
+                }
+                for _ in min..max {
+                    if !match_once() {
+                        break;
+                    }
+                }
+                true
+            }
         }
     }
 }
@@ -234,41 +348,8 @@ impl Alternation {
         captured_groups: &mut Vec<String>,
         current_group: &mut String,
     ) -> bool {
-        match self.count {
-            Count::One => self.match_once(input_line, captured_groups, current_group),
-            Count::OneOrMore => {
-                let mut matched = false;
-                while self.match_once(input_line, captured_groups, current_group) {
-                    matched = true;
-                }
-                matched
-            }
-            Count::ZeroOrOne => {
-                self.match_once(input_line, captured_groups, current_group);
-                true
-            }
-            Count::ZeroOrMore => {
-                while self.match_once(input_line, captured_groups, current_group) {}
-                true
-            }
-            Count::Exact(n) => {
-                for _ in 0..n {
-                    if !self.match_once(input_line, captured_groups, current_group) {
-                        return false;
-                    }
-                }
-                true
-            }
-            Count::AtLeast(n) => {
-                for _ in 0..n {
-                    if !self.match_once(input_line, captured_groups, current_group) {
-                        return false;
-                    }
-                }
-                while self.match_once(input_line, captured_groups, current_group) {}
-                true
-            }
-        }
+        self.count
+            .match_repeated(|| self.match_once(input_line, captured_groups, current_group))
     }
 }
 
@@ -286,41 +367,8 @@ impl Group {
         captured_groups: &mut Vec<String>,
         current_group: &mut String,
     ) -> bool {
-        match self.count {
-            Count::One => self.match_once(input_line, captured_groups, current_group),
-            Count::OneOrMore => {
-                let mut matched = false;
-                while self.match_once(input_line, captured_groups, current_group) {
-                    matched = true;
-                }
-                matched
-            }
-            Count::ZeroOrOne => {
-                self.match_once(input_line, captured_groups, current_group);
-                true
-            }
-            Count::ZeroOrMore => {
-                while self.match_once(input_line, captured_groups, current_group) {}
-                true
-            }
-            Count::Exact(n) => {
-                for _ in 0..n {
-                    if !self.match_once(input_line, captured_groups, current_group) {
-                        return false;
-                    }
-                }
-                true
-            }
-            Count::AtLeast(n) => {
-                for _ in 0..n {
-                    if !self.match_once(input_line, captured_groups, current_group) {
-                        return false;
-                    }
-                }
-                while self.match_once(input_line, captured_groups, current_group) {}
-                true
-            }
-        }
+        self.count
+            .match_repeated(|| self.match_once(input_line, captured_groups, current_group))
     }
 
     fn match_once(
@@ -409,16 +457,33 @@ pub fn match_patterns_with_backtracking(
     }
 
     if matched_pattern && pattern.has_greedy_quantifier() {
-        try_backtracking(
-            input_line,
-            &pattern,
-            remaining_patterns,
-            captured_groups,
-            current_group,
-        )
+        if pattern.is_bounded_range() {
+            try_backtracking_range(
+                input_line,
+                &pattern,
+                remaining_patterns,
+                captured_groups,
+                current_group,
+            )
+        } else {
+            try_backtracking(
+                input_line,
+                &pattern,
+                remaining_patterns,
+                captured_groups,
+                current_group,
+            )
+        }
     } else {
         false
     }
+}
+
+#[derive(Clone)]
+struct BacktrackState<'a> {
+    input: Peekable<Chars<'a>>,
+    groups: Vec<String>,
+    matched: String,
 }
 
 fn try_backtracking(
@@ -428,84 +493,100 @@ fn try_backtracking(
     captured_groups: &mut Vec<String>,
     current_group: &mut String,
 ) -> bool {
-    let original_input = input_line.clone();
-    let mut temp_input = input_line.clone();
+    let Some((min, max)) = pattern.repetition_bounds() else {
+        return false;
+    };
 
-    match pattern {
-        Pattern::CharGroup(
-            negated,
-            group,
-            Count::ZeroOrMore | Count::OneOrMore | Count::AtLeast(_),
-        ) => {
-            while let Some(c) = temp_input.peek() {
-                let matches = c.is_ascii_alphanumeric() && (group.contains(*c) ^ *negated);
-                if !matches {
-                    break;
-                }
-                temp_input.next();
-                let mut input_clone = temp_input.clone();
-                let mut temp_group = String::new();
-                let mut temp_groups = captured_groups.clone();
+    let states = collect_backtrack_states(input_line, pattern, captured_groups, max);
+    let start = min.max(1);
 
-                if match_patterns_with_backtracking(
-                    &mut input_clone,
-                    remaining_patterns,
-                    &mut temp_groups,
-                    &mut temp_group,
-                ) {
-                    *input_line = input_clone;
-                    current_group.push_str(&temp_group);
-                    *captured_groups = temp_groups;
-                    return true;
-                }
-            }
-        }
-        Pattern::Digit(Count::ZeroOrMore | Count::OneOrMore | Count::AtLeast(_)) => {
-            while let Some(c) = temp_input.peek() {
-                if !c.is_ascii_digit() {
-                    break;
-                }
-                temp_input.next();
-                let mut input_clone = temp_input.clone();
-                let mut temp_group = String::new();
-                let mut temp_groups = captured_groups.clone();
+    for state in states.iter().skip(start) {
+        let mut input_clone = state.input.clone();
+        let mut temp_group = String::new();
+        let mut temp_groups = state.groups.clone();
 
-                if match_patterns_with_backtracking(
-                    &mut input_clone,
-                    remaining_patterns,
-                    &mut temp_groups,
-                    &mut temp_group,
-                ) {
-                    *input_line = input_clone;
-                    current_group.push_str(&temp_group);
-                    *captured_groups = temp_groups;
-                    return true;
-                }
-            }
-        }
-        _ => {
-            while let Some(_c) = temp_input.next() {
-                let mut input_clone = temp_input.clone();
-                let mut temp_group = String::new();
-                let mut temp_groups = captured_groups.clone();
-
-                if match_patterns_with_backtracking(
-                    &mut input_clone,
-                    remaining_patterns,
-                    &mut temp_groups,
-                    &mut temp_group,
-                ) {
-                    *input_line = input_clone;
-                    current_group.push_str(&temp_group);
-                    *captured_groups = temp_groups;
-                    return true;
-                }
-            }
+        if match_patterns_with_backtracking(
+            &mut input_clone,
+            remaining_patterns,
+            &mut temp_groups,
+            &mut temp_group,
+        ) {
+            *input_line = input_clone;
+            current_group.push_str(&temp_group);
+            *captured_groups = temp_groups;
+            return true;
         }
     }
 
-    *input_line = original_input;
     false
+}
+
+fn try_backtracking_range(
+    input_line: &mut Peekable<Chars>,
+    pattern: &Pattern,
+    remaining_patterns: &[Pattern],
+    captured_groups: &mut Vec<String>,
+    current_group: &mut String,
+) -> bool {
+    let Some((min, max)) = pattern.repetition_bounds() else {
+        return false;
+    };
+
+    let states = collect_backtrack_states(input_line, pattern, captured_groups, max);
+
+    for state in states[min..].iter().rev() {
+        let mut input_clone = state.input.clone();
+        let mut temp_group = state.matched.clone();
+        let mut temp_groups = state.groups.clone();
+
+        if match_patterns_with_backtracking(
+            &mut input_clone,
+            remaining_patterns,
+            &mut temp_groups,
+            &mut temp_group,
+        ) {
+            *input_line = input_clone;
+            current_group.push_str(&temp_group);
+            *captured_groups = temp_groups;
+            return true;
+        }
+    }
+
+    false
+}
+
+fn collect_backtrack_states<'a>(
+    input_line: &Peekable<Chars<'a>>,
+    pattern: &Pattern,
+    captured_groups: &[String],
+    max: Option<usize>,
+) -> Vec<BacktrackState<'a>> {
+    let single = pattern.as_single_match();
+    let mut states = vec![BacktrackState {
+        input: input_line.clone(),
+        groups: captured_groups.to_vec(),
+        matched: String::new(),
+    }];
+
+    let mut next_input = input_line.clone();
+    let mut next_groups = captured_groups.to_vec();
+    let mut next_matched = String::new();
+
+    while max.is_none_or(|limit| states.len() - 1 < limit) {
+        let mut piece = String::new();
+        let mut single_pattern = single.clone();
+        if !single_pattern.match_substring(&mut next_input, &mut next_groups, &mut piece) {
+            break;
+        }
+        next_matched.push_str(&piece);
+        states.push(BacktrackState {
+            input: next_input.clone(),
+            groups: next_groups.clone(),
+            matched: next_matched.clone(),
+        });
+    }
+
+    states
 }
 
 fn match_backreference(

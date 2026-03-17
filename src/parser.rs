@@ -79,10 +79,31 @@ impl Parser {
                                 .expect("lower bound quantifier should be a number"),
                         );
                     }
-                    _ => panic!("Expected '{{n,}}' quantifier"),
+                    Some(c) if c.is_ascii_digit() => {
+                        let mut upper = String::from(c);
+                        loop {
+                            match chars.next() {
+                                Some('}') => {
+                                    let lower = count
+                                        .parse()
+                                        .expect("range lower bound quantifier should be a number");
+                                    let upper = upper
+                                        .parse()
+                                        .expect("range upper bound quantifier should be a number");
+                                    if lower > upper {
+                                        panic!("Expected '{{n,m}}' quantifier with n <= m");
+                                    }
+                                    return Count::Range(lower, upper);
+                                }
+                                Some(c) if c.is_ascii_digit() => upper.push(c),
+                                _ => panic!("Expected '{{n,m}}' quantifier"),
+                            }
+                        }
+                    }
+                    _ => panic!("Expected '{{n,}}' or '{{n,m}}' quantifier"),
                 },
                 Some(c) if c.is_ascii_digit() => count.push(c),
-                _ => panic!("Expected '{{n}}' or '{{n,}}' quantifier"),
+                _ => panic!("Expected '{{n}}', '{{n,}}' or '{{n,m}}' quantifier"),
             }
         }
     }

@@ -299,6 +299,28 @@ fn quantifiers_at_least_count() {
 }
 
 #[test]
+fn quantifiers_bounded_range() {
+    assert_eq!(match_regex("caat", r"ca{2,4}t"), Some("caat".to_string()));
+    assert_eq!(match_regex("caaat", r"ca{2,4}t"), Some("caaat".to_string()));
+    assert_eq!(
+        match_regex("caaaat", r"ca{2,4}t"),
+        Some("caaaat".to_string())
+    );
+    assert!(match_regex("caaaaat", r"ca{2,4}t").is_none());
+    assert_eq!(
+        match_regex("n123m", r"n\d{1,3}m"),
+        Some("n123m".to_string())
+    );
+    assert!(match_regex("n1234m", r"n\d{1,3}m").is_none());
+    assert_eq!(
+        match_regex("pzzzq", r"p[xyz]{2,3}q"),
+        Some("pzzzq".to_string())
+    );
+    assert!(match_regex("pxq", r"p[xyz]{2,3}q").is_none());
+    assert!(match_regex("pxyzyq", r"p[xyz]{2,3}q").is_none());
+}
+
+#[test]
 fn alternation_basic() {
     assert_eq!(
         match_regex("a cat", "a (cat|dog)"),
