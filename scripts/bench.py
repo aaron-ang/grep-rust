@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import json
 import shutil
 import subprocess
@@ -23,13 +24,43 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Benchmark grep-rust against system grep and generate an SVG chart."
+    )
+    parser.add_argument(
+        "-E",
+        "--pattern",
+        default=r"matched_line_\d+",
+        help="regex pattern to benchmark",
+    )
+    parser.add_argument(
+        "-i",
+        "--input-file",
+        type=Path,
+        default=Path("bench/data.txt"),
+        help="input file used for benchmarking",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-file",
+        type=Path,
+        default=Path("bench/benchmark.svg"),
+        help="output SVG chart path",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
     if shutil.which("hyperfine") is None:
-        fail("hyperfine is not installed\nmacOS: brew install hyperfine\nUbuntu/Debian: sudo apt install hyperfine")
+        fail(
+            "hyperfine is not installed\nmacOS: brew install hyperfine\nUbuntu/Debian: sudo apt install hyperfine"
+        )
 
-    pattern = sys.argv[1] if len(sys.argv) > 1 else r"matched_line_\d+"
-    input_file = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("bench/data.txt")
-    output_file = Path(sys.argv[3]) if len(sys.argv) > 3 else Path("bench/benchmark.svg")
+    args = parse_args()
+    pattern = args.pattern
+    input_file = args.input_file
+    output_file = args.output_file
 
     if not input_file.is_file():
         fail(
