@@ -14,6 +14,9 @@ use grep_rust::match_regex;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    #[arg(short = 'o')]
+    only_matching: bool,
+
     #[arg(short = 'E', allow_hyphen_values = true, value_name = "pattern")]
     pattern: String,
 
@@ -29,7 +32,7 @@ fn main() -> Result<()> {
     let match_count = if args.files.is_empty() {
         let stdin = io::stdin();
         let reader = BufReader::new(stdin.lock());
-        process_lines(reader, &args.pattern, None)?
+        process_lines(reader, &args.pattern, None, args.only_matching)?
     } else {
         let file_paths = collect_files(&args.files, args.recursive)?;
         let mut total = 0;
@@ -38,7 +41,7 @@ fn main() -> Result<()> {
             let file = File::open(&file_path)?;
             let reader = BufReader::new(file);
             let prefix = show_prefix.then_some(file_path.to_str().unwrap());
-            total += process_lines(reader, &args.pattern, prefix)?;
+            total += process_lines(reader, &args.pattern, prefix, args.only_matching)?;
         }
         total
     };
@@ -46,7 +49,12 @@ fn main() -> Result<()> {
     process::exit(if match_count > 0 { 0 } else { 1 });
 }
 
-fn process_lines<R: BufRead>(reader: R, pattern: &str, filename: Option<&str>) -> Result<usize> {
+fn process_lines<R: BufRead>(
+    reader: R,
+    pattern: &str,
+    filename: Option<&str>,
+    only_matching: bool,
+) -> Result<usize> {
     let mut match_count = 0;
     let prefix = filename.map(|s| format!("{s}:")).unwrap_or_default();
     for line in reader.lines() {
@@ -54,18 +62,22 @@ fn process_lines<R: BufRead>(reader: R, pattern: &str, filename: Option<&str>) -
         if let Some(matched) = match_regex(&line, pattern) {
             match_count += 1;
 
-            let output = match line.find(&matched) {
-                Some(start) => {
-                    let end = start + matched.len();
-                    format!(
-                        "{}{}{}{}",
-                        prefix,
-                        &line[..start],
-                        &line[start..end].bright_red().bold(),
-                        &line[end..]
-                    )
+            let output = if only_matching {
+                format!("{prefix}{matched}")
+            } else {
+                match line.find(&matched) {
+                    Some(start) => {
+                        let end = start + matched.len();
+                        format!(
+                            "{}{}{}{}",
+                            prefix,
+                            &line[..start],
+                            &line[start..end].bright_red().bold(),
+                            &line[end..]
+                        )
+                    }
+                    None => format!("{prefix}{line}"),
                 }
-                None => format!("{prefix}{line}"),
             };
 
             println!("{output}");
