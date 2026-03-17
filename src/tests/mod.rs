@@ -2,8 +2,23 @@
 use super::*;
 
 #[cfg(test)]
+fn find_all_regex(input_line: &str, regex: &str) -> Vec<String> {
+    let compiled = compile_regex(regex);
+    find_all_regex_spans_compiled(input_line, &compiled)
+        .into_iter()
+        .map(|matched| input_line[matched.start..matched.end].to_string())
+        .collect()
+}
+
+#[cfg(test)]
+fn find_all_regex_spans(input_line: &str, regex: &str) -> Vec<RegexMatch> {
+    let compiled = compile_regex(regex);
+    find_all_regex_spans_compiled(input_line, &compiled)
+}
+
+#[cfg(test)]
 fn first_match(input_line: &str, regex: &str) -> Option<String> {
-    crate::find_all_regex(input_line, regex).into_iter().next()
+    find_all_regex(input_line, regex).into_iter().next()
 }
 
 #[test]
@@ -143,7 +158,10 @@ fn literal_character_matching() {
 fn wildcard_matching() {
     assert_eq!(first_match("cat", "c.t"), Some("cat".to_string()));
     assert!(first_match("car", "c.t").is_none());
-    assert_eq!(first_match("goøö0Ogol", "g.+gol"), Some("ggol".to_string()));
+    assert_eq!(
+        first_match("goøö0Ogol", "g.+gol"),
+        Some("goøö0Ogol".to_string())
+    );
     assert!(first_match("gol", "g.+gol").is_none());
 }
 
@@ -252,7 +270,7 @@ fn quantifiers_zero_or_one() {
 #[test]
 fn quantifiers_one_or_more() {
     assert_eq!(first_match("cat", "ca+t"), Some("cat".to_string()));
-    assert_eq!(first_match("caaats", "ca+at"), Some("cat".to_string()));
+    assert_eq!(first_match("caaats", "ca+at"), Some("caaat".to_string()));
     assert!(first_match("act", "ca+t").is_none());
     assert!(first_match("ca", "ca+t").is_none());
     assert_eq!(
@@ -467,6 +485,40 @@ fn multiple_backreferences() {
         r"(c.t|d.g) and (f..h|b..d), \1 with \2"
     )
     .is_none());
+}
+
+#[test]
+fn match_spans_report_positions() {
+    assert_eq!(
+        find_all_regex_spans("jekyll and hyde", "(jekyll|hyde)"),
+        vec![
+            RegexMatch { start: 0, end: 6 },
+            RegexMatch { start: 11, end: 15 },
+        ]
+    );
+    assert_eq!(
+        find_all_regex_spans("goøö0Ogol", "g.+gol"),
+        vec![RegexMatch {
+            start: 0,
+            end: "goøö0Ogol".len(),
+        }]
+    );
+}
+
+#[test]
+fn compiled_regex_can_be_reused() {
+    let compiled = compile_regex(r"\d");
+    assert_eq!(
+        find_all_regex_spans_compiled("The king had 10 children", &compiled),
+        vec![
+            RegexMatch { start: 13, end: 14 },
+            RegexMatch { start: 14, end: 15 }
+        ]
+    );
+    assert_eq!(
+        find_all_regex_spans_compiled("No digits here", &compiled),
+        Vec::new()
+    );
 }
 
 #[test]

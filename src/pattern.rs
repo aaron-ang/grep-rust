@@ -1,22 +1,22 @@
-use std::{iter::Peekable, str::Chars};
-
 use crate::parser::Parser;
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    /// A literal character, with a quantifier
     Literal(char, Count),
-    /// A digit class [0-9], with a quantifier
     Digit(Count),
-    /// An alphanumeric class [A-Za-z0-9_] (underscore allowed), with a quantifier
     Alphanumeric(Count),
     Wildcard(Count),
-    /// A simple character group (possibly negated), with a quantifier
-    CharGroup(bool, String, Count),
-    Alternation(Alternation),
-    /// Capturing group: ( ... ) with group index and quantifier
-    CapturedGroup(Group),
-    /// Backreference: \1, \2, ...
+    CharGroup(CharGroup, Count),
+    Alternation {
+        idx: usize,
+        alternatives: Vec<Vec<Pattern>>,
+        count: Count,
+    },
+    CapturedGroup {
+        idx: usize,
+        patterns: Vec<Pattern>,
+        count: Count,
+    },
     Backreference(usize),
 }
 
@@ -48,122 +48,16 @@ impl Pattern {
         (patterns, start, end)
     }
 
-    fn match_substring(
-        &mut self,
-        input_line: &mut Peekable<Chars>,
-        captured_groups: &mut Vec<String>,
-        current_group: &mut String,
-    ) -> bool {
+    fn count(&self) -> Count {
         match self {
-            Pattern::Literal(l, count) => count.match_count(input_line, |c| c == l, current_group),
-            Pattern::Digit(count) => {
-                count.match_count(input_line, |c| c.is_ascii_digit(), current_group)
-            }
-            Pattern::Alphanumeric(count) => count.match_count(
-                input_line,
-                |c| c.is_ascii_alphanumeric() || *c == '_',
-                current_group,
-            ),
-            Pattern::Wildcard(count) => {
-                let restricted_chars = "\\[](|)";
-                count.match_count(
-                    input_line,
-                    |c| !restricted_chars.contains(*c),
-                    current_group,
-                )
-            }
-            Pattern::CharGroup(negated, group, count) => count.match_count(
-                input_line,
-                |c| c.is_ascii_alphanumeric() && (group.contains(*c) ^ *negated),
-                current_group,
-            ),
-            Pattern::Alternation(alternation) => {
-                alternation.match_with_count(input_line, captured_groups, current_group)
-            }
-            Pattern::CapturedGroup(group) => {
-                group.match_with_count(input_line, captured_groups, current_group)
-            }
-            Pattern::Backreference(n) => {
-                match_backreference(n, input_line, captured_groups, current_group)
-            }
-        }
-    }
-
-    fn has_greedy_quantifier(&self) -> bool {
-        match self {
-            Pattern::Literal(_, count) => count.is_greedy(),
-            Pattern::Digit(count) => count.is_greedy(),
-            Pattern::Alphanumeric(count) => count.is_greedy(),
-            Pattern::Wildcard(count) => count.is_greedy(),
-            Pattern::CharGroup(_, _, count) => count.is_greedy(),
-            Pattern::Alternation(alt) => alt.count.is_greedy(),
-            Pattern::CapturedGroup(group) => group.count.is_greedy(),
-            Pattern::Backreference(_) => false,
-        }
-    }
-
-    fn is_bounded_range(&self) -> bool {
-        matches!(
-            self,
-            Pattern::Literal(_, Count::Range(_, _))
-                | Pattern::Digit(Count::Range(_, _))
-                | Pattern::Alphanumeric(Count::Range(_, _))
-                | Pattern::Wildcard(Count::Range(_, _))
-                | Pattern::CharGroup(_, _, Count::Range(_, _))
-                | Pattern::Alternation(Alternation {
-                    count: Count::Range(_, _),
-                    ..
-                })
-                | Pattern::CapturedGroup(Group {
-                    count: Count::Range(_, _),
-                    ..
-                })
-        )
-    }
-
-    fn repetition_bounds(&self) -> Option<(usize, Option<usize>)> {
-        let count = match self {
             Pattern::Literal(_, count)
             | Pattern::Digit(count)
             | Pattern::Alphanumeric(count)
             | Pattern::Wildcard(count)
-            | Pattern::CharGroup(_, _, count) => *count,
-            Pattern::Alternation(alternation) => alternation.count,
-            Pattern::CapturedGroup(group) => group.count,
-            Pattern::Backreference(_) => return None,
-        };
-
-        match count {
-            Count::One => None,
-            Count::OneOrMore => Some((1, None)),
-            Count::ZeroOrOne => Some((0, Some(1))),
-            Count::ZeroOrMore => Some((0, None)),
-            Count::Exact(_) => None,
-            Count::AtLeast(min) => Some((min, None)),
-            Count::Range(min, max) => Some((min, Some(max))),
-        }
-    }
-
-    fn as_single_match(&self) -> Pattern {
-        match self {
-            Pattern::Literal(ch, _) => Pattern::Literal(*ch, Count::One),
-            Pattern::Digit(_) => Pattern::Digit(Count::One),
-            Pattern::Alphanumeric(_) => Pattern::Alphanumeric(Count::One),
-            Pattern::Wildcard(_) => Pattern::Wildcard(Count::One),
-            Pattern::CharGroup(negated, group, _) => {
-                Pattern::CharGroup(*negated, group.clone(), Count::One)
-            }
-            Pattern::Alternation(alternation) => Pattern::Alternation(Alternation {
-                idx: alternation.idx,
-                alternatives: alternation.alternatives.clone(),
-                count: Count::One,
-            }),
-            Pattern::CapturedGroup(group) => Pattern::CapturedGroup(Group {
-                idx: group.idx,
-                patterns: group.patterns.clone(),
-                count: Count::One,
-            }),
-            Pattern::Backreference(n) => Pattern::Backreference(*n),
+            | Pattern::CharGroup(_, count) => *count,
+            Pattern::Alternation { count, .. } => *count,
+            Pattern::CapturedGroup { count, .. } => *count,
+            Pattern::Backreference(_) => Count::One,
         }
     }
 }
@@ -180,469 +74,348 @@ pub enum Count {
 }
 
 impl Count {
-    fn is_greedy(self) -> bool {
-        matches!(
-            self,
-            Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_) | Count::Range(_, _)
-        )
-    }
-
-    fn match_count(
-        self,
-        input_line: &mut Peekable<Chars>,
-        pred: impl Fn(&char) -> bool,
-        current_group: &mut String,
-    ) -> bool {
+    fn repetition_limit(self) -> Option<usize> {
         match self {
-            Self::One => input_line
-                .next_if(&pred)
-                .inspect(|c| current_group.push(*c))
-                .is_some(),
-            Self::OneOrMore => {
-                let mut matched = false;
-                while let Some(c) = input_line.next_if(&pred) {
-                    current_group.push(c);
-                    matched = true;
-                }
-                matched
-            }
-            Self::ZeroOrOne => {
-                if let Some(c) = input_line.next_if(&pred) {
-                    current_group.push(c);
-                }
-                true
-            }
-            Self::ZeroOrMore => {
-                while let Some(c) = input_line.next_if(&pred) {
-                    current_group.push(c);
-                }
-                true
-            }
-            Self::Exact(n) => {
-                for _ in 0..n {
-                    let Some(c) = input_line.next_if(&pred) else {
-                        return false;
-                    };
-                    current_group.push(c);
-                }
-                true
-            }
-            Self::AtLeast(n) => {
-                for _ in 0..n {
-                    let Some(c) = input_line.next_if(&pred) else {
-                        return false;
-                    };
-                    current_group.push(c);
-                }
-                while let Some(c) = input_line.next_if(&pred) {
-                    current_group.push(c);
-                }
-                true
-            }
-            Self::Range(min, max) => {
-                for _ in 0..min {
-                    let Some(c) = input_line.next_if(&pred) else {
-                        return false;
-                    };
-                    current_group.push(c);
-                }
-                for _ in min..max {
-                    let Some(c) = input_line.next_if(&pred) else {
-                        break;
-                    };
-                    current_group.push(c);
-                }
-                true
-            }
+            Count::One => Some(1),
+            Count::OneOrMore => None,
+            Count::ZeroOrOne => Some(1),
+            Count::ZeroOrMore => None,
+            Count::Exact(n) => Some(n),
+            Count::AtLeast(_) => None,
+            Count::Range(_, max) => Some(max),
         }
     }
 
-    fn match_repeated(self, mut match_once: impl FnMut() -> bool) -> bool {
+    fn candidate_counts(self, max_available: usize) -> Vec<usize> {
         match self {
-            Self::One => match_once(),
-            Self::OneOrMore => {
-                let mut matched = false;
-                while match_once() {
-                    matched = true;
+            Count::One => (max_available >= 1).then_some(vec![1]).unwrap_or_default(),
+            Count::ZeroOrOne => {
+                if max_available >= 1 {
+                    vec![1]
+                } else {
+                    vec![0]
                 }
-                matched
             }
-            Self::ZeroOrOne => {
-                match_once();
-                true
-            }
-            Self::ZeroOrMore => {
-                while match_once() {}
-                true
-            }
-            Self::Exact(n) => {
-                for _ in 0..n {
-                    if !match_once() {
-                        return false;
-                    }
+            Count::OneOrMore => {
+                if max_available == 0 {
+                    Vec::new()
+                } else {
+                    let mut counts = vec![max_available];
+                    counts.extend(1..max_available);
+                    counts
                 }
-                true
             }
-            Self::AtLeast(n) => {
-                for _ in 0..n {
-                    if !match_once() {
-                        return false;
-                    }
+            Count::ZeroOrMore => {
+                if max_available == 0 {
+                    vec![0]
+                } else {
+                    let mut counts = vec![max_available];
+                    counts.extend(1..max_available);
+                    counts
                 }
-                while match_once() {}
-                true
             }
-            Self::Range(min, max) => {
-                for _ in 0..min {
-                    if !match_once() {
-                        return false;
-                    }
+            Count::Exact(n) => (max_available >= n).then_some(vec![n]).unwrap_or_default(),
+            Count::AtLeast(min) => {
+                if max_available < min {
+                    Vec::new()
+                } else {
+                    let mut counts = vec![max_available];
+                    counts.extend(min..max_available);
+                    counts
                 }
-                for _ in min..max {
-                    if !match_once() {
-                        break;
-                    }
+            }
+            Count::Range(min, max) => {
+                let capped = max_available.min(max);
+                if capped < min {
+                    Vec::new()
+                } else {
+                    (min..=capped).rev().collect()
                 }
-                true
             }
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Alternation {
-    pub idx: usize,
-    pub alternatives: Vec<Vec<Pattern>>,
-    pub count: Count,
+pub struct CharGroup {
+    negated: bool,
+    ascii_members: [bool; 128],
 }
 
-impl Alternation {
-    fn match_once(
-        &mut self,
-        input_line: &mut Peekable<Chars>,
-        captured_groups: &mut Vec<String>,
-        current_group: &mut String,
-    ) -> bool {
-        let mut new_current_group = String::new();
-        for alt in &mut self.alternatives {
-            let mut input_clone = input_line.clone();
-            if alt.iter_mut().all(|pattern| {
-                pattern.match_substring(&mut input_clone, captured_groups, &mut new_current_group)
-            }) {
-                current_group.push_str(&new_current_group);
-                if self.idx >= captured_groups.len() {
-                    captured_groups.resize(self.idx + 1, String::new());
-                }
-                captured_groups[self.idx] = new_current_group;
-                *input_line = input_clone;
-                return true;
+impl CharGroup {
+    pub fn new(negated: bool, members: &str) -> Self {
+        let mut ascii_members = [false; 128];
+        for member in members.chars() {
+            if member.is_ascii() {
+                ascii_members[member as usize] = true;
             }
-            new_current_group.clear();
         }
-        false
+
+        Self {
+            negated,
+            ascii_members,
+        }
     }
 
-    fn match_with_count(
-        &mut self,
-        input_line: &mut Peekable<Chars>,
-        captured_groups: &mut Vec<String>,
-        current_group: &mut String,
-    ) -> bool {
-        self.count
-            .match_repeated(|| self.match_once(input_line, captured_groups, current_group))
+    fn matches(self: &CharGroup, c: char) -> bool {
+        c.is_ascii_alphanumeric() && (self.ascii_members[c as usize] ^ self.negated)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Group {
-    pub idx: usize,
-    pub patterns: Vec<Pattern>,
-    pub count: Count,
+pub struct CompiledRegex {
+    patterns: Vec<Pattern>,
+    start_anchor: bool,
+    end_anchor: bool,
 }
 
-impl Group {
-    fn match_with_count(
-        &mut self,
-        input_line: &mut Peekable<Chars>,
-        captured_groups: &mut Vec<String>,
-        current_group: &mut String,
-    ) -> bool {
-        self.count
-            .match_repeated(|| self.match_once(input_line, captured_groups, current_group))
-    }
-
-    fn match_once(
-        &mut self,
-        input_line: &mut Peekable<Chars>,
-        captured_groups: &mut Vec<String>,
-        current_group: &mut String,
-    ) -> bool {
-        let mut new_current_group = String::new();
-        if self.patterns.iter_mut().all(|pattern| {
-            pattern.match_substring(input_line, captured_groups, &mut new_current_group)
-        }) {
-            current_group.push_str(&new_current_group);
-            if self.idx >= captured_groups.len() {
-                captured_groups.resize(self.idx + 1, String::new());
-            }
-            captured_groups[self.idx] = new_current_group;
-            true
-        } else {
-            false
+impl CompiledRegex {
+    pub fn new(regex: &str) -> Self {
+        let (patterns, start_anchor, end_anchor) = Pattern::parse(regex);
+        Self {
+            patterns,
+            start_anchor,
+            end_anchor,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegexMatch {
     pub start: usize,
-    pub text: String,
+    pub end: usize,
 }
 
-pub fn find_all_regex(input_line: &str, regex: &str) -> Vec<String> {
-    find_all_regex_spans(input_line, regex)
-        .into_iter()
-        .map(|matched| matched.text)
-        .collect()
+#[derive(Debug, Clone, Copy)]
+pub struct CaptureSpan {
+    start: usize,
+    end: usize,
 }
 
-pub fn find_all_regex_spans(input_line: &str, regex: &str) -> Vec<RegexMatch> {
-    let input_str = input_line.trim();
-    let (patterns, start, end) = Pattern::parse(regex);
+type Captures = Vec<Option<CaptureSpan>>;
+
+#[derive(Clone)]
+struct MatchState {
+    pos: usize,
+    captures: Captures,
+}
+
+pub fn compile_regex(regex: &str) -> CompiledRegex {
+    CompiledRegex::new(regex)
+}
+
+pub fn find_all_regex_spans_compiled(input_line: &str, regex: &CompiledRegex) -> Vec<RegexMatch> {
     let mut matches = Vec::new();
 
-    if start {
-        if let Some(matched) = match_from(input_str, &patterns, end) {
-            matches.push(RegexMatch {
-                start: 0,
-                text: matched,
-            });
+    if regex.start_anchor {
+        if let Some(end) = match_from(regex, input_line, 0) {
+            matches.push(RegexMatch { start: 0, end });
         }
         return matches;
     }
 
-    let mut offset = 0;
-    while offset < input_str.len() {
-        let slice = &input_str[offset..];
-        if slice.is_empty() {
-            break;
-        }
-
-        let mut found = None;
-        for (idx, _) in slice.char_indices() {
-            if let Some(matched) = match_from(&slice[idx..], &patterns, end) {
-                found = Some((idx, matched));
+    let mut start = 0;
+    while start < input_line.len() {
+        if let Some(end) = match_from(regex, input_line, start) {
+            matches.push(RegexMatch { start, end });
+            start = advance_after_match(input_line, start, end);
+        } else {
+            let Some(next) = next_char_boundary(input_line, start) else {
                 break;
-            }
+            };
+            start = next;
         }
-
-        let Some((start_idx, matched)) = found else {
-            break;
-        };
-
-        let advance = start_idx + matched.len().max(1);
-        matches.push(RegexMatch {
-            start: offset + start_idx,
-            text: matched,
-        });
-        offset += advance;
     }
 
     matches
 }
 
-fn match_from(input: &str, patterns: &[Pattern], end: bool) -> Option<String> {
-    let mut input_line = input.chars().peekable();
-
-    let mut groups = Vec::new();
-    let mut current_group = String::new();
-    if match_patterns_with_backtracking(&mut input_line, patterns, &mut groups, &mut current_group)
-        && (!end || input_line.peek().is_none())
-    {
-        Some(current_group)
+fn match_from(regex: &CompiledRegex, input: &str, start: usize) -> Option<usize> {
+    let captures = Vec::new();
+    let (end, _) = match_patterns(input, &regex.patterns, start, &captures)?;
+    if !regex.end_anchor || end == input.len() {
+        Some(end)
     } else {
         None
     }
 }
 
-pub fn match_patterns_with_backtracking(
-    input_line: &mut Peekable<Chars>,
+fn match_patterns(
+    input: &str,
     patterns: &[Pattern],
-    captured_groups: &mut Vec<String>,
-    current_group: &mut String,
-) -> bool {
+    pos: usize,
+    captures: &Captures,
+) -> Option<(usize, Captures)> {
     if patterns.is_empty() {
-        return true;
+        return Some((pos, captures.clone()));
     }
 
-    let mut pattern = patterns[0].clone();
-    let remaining_patterns = &patterns[1..];
-
-    let mut input = input_line.clone();
-    let mut temp_group = String::new();
-    let mut temp_groups = captured_groups.clone();
-
-    let matched_pattern = pattern.match_substring(&mut input, &mut temp_groups, &mut temp_group);
-
-    if matched_pattern
-        && match_patterns_with_backtracking(
-            &mut input,
-            remaining_patterns,
-            &mut temp_groups,
-            &mut temp_group,
-        )
-    {
-        *input_line = input;
-        current_group.push_str(&temp_group);
-        *captured_groups = temp_groups;
-        return true;
-    }
-
-    if matched_pattern && pattern.has_greedy_quantifier() {
-        if pattern.is_bounded_range() {
-            try_backtracking_range(
-                input_line,
-                &pattern,
-                remaining_patterns,
-                captured_groups,
-                current_group,
-            )
-        } else {
-            try_backtracking(
-                input_line,
-                &pattern,
-                remaining_patterns,
-                captured_groups,
-                current_group,
-            )
+    let pattern = &patterns[0];
+    match pattern.count() {
+        Count::One => {
+            let state = match_single(pattern, input, pos, captures)?;
+            return match_patterns(input, &patterns[1..], state.pos, &state.captures);
         }
-    } else {
-        false
+        Count::ZeroOrOne => {
+            if let Some(state) = match_single(pattern, input, pos, captures) {
+                return match_patterns(input, &patterns[1..], state.pos, &state.captures);
+            }
+            return match_patterns(input, &patterns[1..], pos, captures);
+        }
+        Count::Exact(1) => {
+            let state = match_single(pattern, input, pos, captures)?;
+            return match_patterns(input, &patterns[1..], state.pos, &state.captures);
+        }
+        _ => {}
     }
-}
 
-#[derive(Clone)]
-struct BacktrackState<'a> {
-    input: Peekable<Chars<'a>>,
-    groups: Vec<String>,
-    matched: String,
-}
+    let states = collect_match_states(input, pattern, pos, captures);
+    let max_available = states.len().saturating_sub(1);
 
-fn try_backtracking(
-    input_line: &mut Peekable<Chars>,
-    pattern: &Pattern,
-    remaining_patterns: &[Pattern],
-    captured_groups: &mut Vec<String>,
-    current_group: &mut String,
-) -> bool {
-    let Some((min, max)) = pattern.repetition_bounds() else {
-        return false;
-    };
-
-    let states = collect_backtrack_states(input_line, pattern, captured_groups, max);
-    let start = min.max(1);
-
-    for state in states.iter().skip(start) {
-        let mut input_clone = state.input.clone();
-        let mut temp_group = String::new();
-        let mut temp_groups = state.groups.clone();
-
-        if match_patterns_with_backtracking(
-            &mut input_clone,
-            remaining_patterns,
-            &mut temp_groups,
-            &mut temp_group,
-        ) {
-            *input_line = input_clone;
-            current_group.push_str(&temp_group);
-            *captured_groups = temp_groups;
-            return true;
+    for count in pattern.count().candidate_counts(max_available) {
+        let state = &states[count];
+        if let Some((end, final_captures)) =
+            match_patterns(input, &patterns[1..], state.pos, &state.captures)
+        {
+            return Some((end, final_captures));
         }
     }
 
-    false
+    None
 }
 
-fn try_backtracking_range(
-    input_line: &mut Peekable<Chars>,
+fn collect_match_states(
+    input: &str,
     pattern: &Pattern,
-    remaining_patterns: &[Pattern],
-    captured_groups: &mut Vec<String>,
-    current_group: &mut String,
-) -> bool {
-    let Some((min, max)) = pattern.repetition_bounds() else {
-        return false;
-    };
-
-    let states = collect_backtrack_states(input_line, pattern, captured_groups, max);
-
-    for state in states[min..].iter().rev() {
-        let mut input_clone = state.input.clone();
-        let mut temp_group = state.matched.clone();
-        let mut temp_groups = state.groups.clone();
-
-        if match_patterns_with_backtracking(
-            &mut input_clone,
-            remaining_patterns,
-            &mut temp_groups,
-            &mut temp_group,
-        ) {
-            *input_line = input_clone;
-            current_group.push_str(&temp_group);
-            *captured_groups = temp_groups;
-            return true;
-        }
-    }
-
-    false
-}
-
-fn collect_backtrack_states<'a>(
-    input_line: &Peekable<Chars<'a>>,
-    pattern: &Pattern,
-    captured_groups: &[String],
-    max: Option<usize>,
-) -> Vec<BacktrackState<'a>> {
-    let single = pattern.as_single_match();
-    let mut states = vec![BacktrackState {
-        input: input_line.clone(),
-        groups: captured_groups.to_vec(),
-        matched: String::new(),
+    pos: usize,
+    captures: &Captures,
+) -> Vec<MatchState> {
+    let max = pattern.count().repetition_limit();
+    let mut states = vec![MatchState {
+        pos,
+        captures: captures.clone(),
     }];
 
-    let mut next_input = input_line.clone();
-    let mut next_groups = captured_groups.to_vec();
-    let mut next_matched = String::new();
-
     while max.is_none_or(|limit| states.len() - 1 < limit) {
-        let mut piece = String::new();
-        let mut single_pattern = single.clone();
-        if !single_pattern.match_substring(&mut next_input, &mut next_groups, &mut piece) {
+        let previous = states.last().unwrap().clone();
+        let Some(next) = match_single(pattern, input, previous.pos, &previous.captures) else {
+            break;
+        };
+
+        if next.pos == previous.pos && max.is_none() {
             break;
         }
-        next_matched.push_str(&piece);
-        states.push(BacktrackState {
-            input: next_input.clone(),
-            groups: next_groups.clone(),
-            matched: next_matched.clone(),
-        });
+
+        states.push(next);
+
+        if states.last().unwrap().pos == previous.pos {
+            break;
+        }
     }
 
     states
 }
 
-fn match_backreference(
-    n: &usize,
-    input_line: &mut Peekable<Chars>,
-    captured_groups: &[String],
-    current_group: &mut String,
-) -> bool {
-    captured_groups.get(*n - 1).is_some_and(|matched| {
-        let chars: String = input_line.take(matched.len()).collect();
-        if matched == &chars {
-            current_group.push_str(&chars);
-            return true;
+fn match_single(
+    pattern: &Pattern,
+    input: &str,
+    pos: usize,
+    captures: &Captures,
+) -> Option<MatchState> {
+    match pattern {
+        Pattern::Literal(literal, _) => {
+            match_char(input, pos, |c| c == *literal).map(|next| MatchState {
+                pos: next,
+                captures: captures.clone(),
+            })
         }
-        false
+        Pattern::Digit(_) => {
+            match_char(input, pos, |c| c.is_ascii_digit()).map(|next| MatchState {
+                pos: next,
+                captures: captures.clone(),
+            })
+        }
+        Pattern::Alphanumeric(_) => match_char(input, pos, |c| {
+            c.is_ascii_alphanumeric() || c == '_'
+        })
+        .map(|next| MatchState {
+            pos: next,
+            captures: captures.clone(),
+        }),
+        Pattern::Wildcard(_) => {
+            let restricted_chars = "\\[](|)";
+            match_char(input, pos, |c| !restricted_chars.contains(c)).map(|next| MatchState {
+                pos: next,
+                captures: captures.clone(),
+            })
+        }
+        Pattern::CharGroup(group, _) => {
+            match_char(input, pos, |c| group.matches(c)).map(|next| MatchState {
+                pos: next,
+                captures: captures.clone(),
+            })
+        }
+        Pattern::Alternation {
+            alternatives, idx, ..
+        } => alternatives.iter().find_map(|alternative| {
+            let (end, mut next_captures) = match_patterns(input, alternative, pos, captures)?;
+            set_capture(&mut next_captures, *idx, CaptureSpan { start: pos, end });
+            Some(MatchState {
+                pos: end,
+                captures: next_captures,
+            })
+        }),
+        Pattern::CapturedGroup { patterns, idx, .. } => {
+            let (end, mut next_captures) = match_patterns(input, patterns, pos, captures)?;
+            set_capture(&mut next_captures, *idx, CaptureSpan { start: pos, end });
+            Some(MatchState {
+                pos: end,
+                captures: next_captures,
+            })
+        }
+        Pattern::Backreference(index) => match_backreference(input, pos, *index, captures),
+    }
+}
+
+fn match_backreference(
+    input: &str,
+    pos: usize,
+    index: usize,
+    captures: &Captures,
+) -> Option<MatchState> {
+    let capture = captures.get(index - 1).copied().flatten()?;
+    let matched = &input[capture.start..capture.end];
+    input[pos..].starts_with(matched).then_some(MatchState {
+        pos: pos + matched.len(),
+        captures: captures.clone(),
     })
+}
+
+fn set_capture(captures: &mut Captures, idx: usize, span: CaptureSpan) {
+    if captures.len() <= idx {
+        captures.resize(idx + 1, None);
+    }
+    captures[idx] = Some(span);
+}
+
+fn match_char(input: &str, pos: usize, pred: impl Fn(char) -> bool) -> Option<usize> {
+    let (matched, next) = current_char(input, pos)?;
+    pred(matched).then_some(next)
+}
+
+fn current_char(input: &str, pos: usize) -> Option<(char, usize)> {
+    let matched = input[pos..].chars().next()?;
+    Some((matched, pos + matched.len_utf8()))
+}
+
+fn next_char_boundary(input: &str, pos: usize) -> Option<usize> {
+    current_char(input, pos).map(|(_, next)| next)
+}
+
+fn advance_after_match(input: &str, start: usize, end: usize) -> usize {
+    if end > start {
+        end
+    } else {
+        next_char_boundary(input, start).unwrap_or(input.len())
+    }
 }

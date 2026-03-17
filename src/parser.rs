@@ -1,6 +1,6 @@
 use std::{iter::Peekable, str::Chars};
 
-use crate::pattern::{Alternation, Count, Group, Pattern};
+use crate::pattern::{CharGroup, Count, Pattern};
 
 pub struct Parser {
     group_idx: usize,
@@ -17,7 +17,7 @@ impl Parser {
             '\\' => Parser::parse_escape(chars),
             '[' => {
                 let (negated, group) = Parser::parse_char_group(chars);
-                Pattern::CharGroup(negated, group, Parser::parse_count(chars))
+                Pattern::CharGroup(CharGroup::new(negated, &group), Parser::parse_count(chars))
             }
             '.' => Pattern::Wildcard(Parser::parse_count(chars)),
             '(' => self.parse_group(chars),
@@ -129,17 +129,17 @@ impl Parser {
         let (idx, mut patterns) = self.parse_alternation(chars);
         let count = Parser::parse_count(chars);
         if patterns.len() == 1 {
-            Pattern::CapturedGroup(Group {
+            Pattern::CapturedGroup {
                 idx,
                 patterns: patterns.pop().unwrap(),
                 count,
-            })
+            }
         } else {
-            Pattern::Alternation(Alternation {
+            Pattern::Alternation {
                 idx,
                 alternatives: patterns,
                 count,
-            })
+            }
         }
     }
 
