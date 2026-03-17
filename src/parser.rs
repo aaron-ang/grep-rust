@@ -55,24 +55,36 @@ impl Parser {
                 chars.next();
                 Count::ZeroOrMore
             }
-            Some('{') => Parser::parse_exact_count(chars),
+            Some('{') => Parser::parse_braced_count(chars),
             _ => Count::One,
         }
     }
 
-    fn parse_exact_count(chars: &mut Peekable<Chars>) -> Count {
+    fn parse_braced_count(chars: &mut Peekable<Chars>) -> Count {
         chars.next();
 
         let mut count = String::new();
         loop {
             match chars.next() {
-                Some('}') if !count.is_empty() => break,
+                Some('}') if !count.is_empty() => {
+                    return Count::Exact(
+                        count.parse().expect("exact quantifier should be a number"),
+                    );
+                }
+                Some(',') if !count.is_empty() => match chars.next() {
+                    Some('}') => {
+                        return Count::AtLeast(
+                            count
+                                .parse()
+                                .expect("lower bound quantifier should be a number"),
+                        );
+                    }
+                    _ => panic!("Expected '{{n,}}' quantifier"),
+                },
                 Some(c) if c.is_ascii_digit() => count.push(c),
-                _ => panic!("Expected '{{n}}' quantifier"),
+                _ => panic!("Expected '{{n}}' or '{{n,}}' quantifier"),
             }
         }
-
-        Count::Exact(count.parse().expect("exact quantifier should be a number"))
     }
 
     fn parse_char_group(chars: &mut Peekable<Chars>) -> (bool, String) {

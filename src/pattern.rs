@@ -91,16 +91,37 @@ impl Pattern {
 
     fn has_greedy_quantifier(&self) -> bool {
         match self {
-            Pattern::Literal(_, count) => matches!(count, Count::OneOrMore | Count::ZeroOrMore),
-            Pattern::Digit(count) => matches!(count, Count::OneOrMore | Count::ZeroOrMore),
-            Pattern::Alphanumeric(count) => matches!(count, Count::OneOrMore | Count::ZeroOrMore),
-            Pattern::Wildcard(count) => matches!(count, Count::OneOrMore | Count::ZeroOrMore),
+            Pattern::Literal(_, count) => matches!(
+                count,
+                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
+            ),
+            Pattern::Digit(count) => matches!(
+                count,
+                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
+            ),
+            Pattern::Alphanumeric(count) => matches!(
+                count,
+                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
+            ),
+            Pattern::Wildcard(count) => matches!(
+                count,
+                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
+            ),
             Pattern::CharGroup(_, _, count) => {
-                matches!(count, Count::OneOrMore | Count::ZeroOrMore)
+                matches!(
+                    count,
+                    Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
+                )
             }
-            Pattern::Alternation(alt) => matches!(alt.count, Count::OneOrMore | Count::ZeroOrMore),
+            Pattern::Alternation(alt) => matches!(
+                alt.count,
+                Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
+            ),
             Pattern::CapturedGroup(group) => {
-                matches!(group.count, Count::OneOrMore | Count::ZeroOrMore)
+                matches!(
+                    group.count,
+                    Count::OneOrMore | Count::ZeroOrMore | Count::AtLeast(_)
+                )
             }
             Pattern::Backreference(_) => false,
         }
@@ -114,6 +135,7 @@ pub enum Count {
     ZeroOrOne,
     ZeroOrMore,
     Exact(usize),
+    AtLeast(usize),
 }
 
 impl Count {
@@ -153,6 +175,18 @@ impl Count {
                     let Some(c) = input_line.next_if(&pred) else {
                         return false;
                     };
+                    current_group.push(c);
+                }
+                true
+            }
+            Self::AtLeast(n) => {
+                for _ in 0..n {
+                    let Some(c) = input_line.next_if(&pred) else {
+                        return false;
+                    };
+                    current_group.push(c);
+                }
+                while let Some(c) = input_line.next_if(&pred) {
                     current_group.push(c);
                 }
                 true
@@ -225,6 +259,15 @@ impl Alternation {
                 }
                 true
             }
+            Count::AtLeast(n) => {
+                for _ in 0..n {
+                    if !self.match_once(input_line, captured_groups, current_group) {
+                        return false;
+                    }
+                }
+                while self.match_once(input_line, captured_groups, current_group) {}
+                true
+            }
         }
     }
 }
@@ -266,6 +309,15 @@ impl Group {
                         return false;
                     }
                 }
+                true
+            }
+            Count::AtLeast(n) => {
+                for _ in 0..n {
+                    if !self.match_once(input_line, captured_groups, current_group) {
+                        return false;
+                    }
+                }
+                while self.match_once(input_line, captured_groups, current_group) {}
                 true
             }
         }
@@ -340,7 +392,9 @@ pub fn match_patterns_with_backtracking(
     let mut temp_group = String::new();
     let mut temp_groups = captured_groups.clone();
 
-    if pattern.match_substring(&mut input, &mut temp_groups, &mut temp_group)
+    let matched_pattern = pattern.match_substring(&mut input, &mut temp_groups, &mut temp_group);
+
+    if matched_pattern
         && match_patterns_with_backtracking(
             &mut input,
             remaining_patterns,
@@ -354,7 +408,7 @@ pub fn match_patterns_with_backtracking(
         return true;
     }
 
-    if pattern.has_greedy_quantifier() {
+    if matched_pattern && pattern.has_greedy_quantifier() {
         try_backtracking(
             input_line,
             &pattern,
@@ -378,7 +432,11 @@ fn try_backtracking(
     let mut temp_input = input_line.clone();
 
     match pattern {
-        Pattern::CharGroup(negated, group, Count::ZeroOrMore | Count::OneOrMore) => {
+        Pattern::CharGroup(
+            negated,
+            group,
+            Count::ZeroOrMore | Count::OneOrMore | Count::AtLeast(_),
+        ) => {
             while let Some(c) = temp_input.peek() {
                 let matches = c.is_ascii_alphanumeric() && (group.contains(*c) ^ *negated);
                 if !matches {
@@ -402,7 +460,7 @@ fn try_backtracking(
                 }
             }
         }
-        Pattern::Digit(Count::ZeroOrMore | Count::OneOrMore) => {
+        Pattern::Digit(Count::ZeroOrMore | Count::OneOrMore | Count::AtLeast(_)) => {
             while let Some(c) = temp_input.peek() {
                 if !c.is_ascii_digit() {
                     break;
