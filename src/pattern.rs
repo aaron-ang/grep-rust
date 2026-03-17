@@ -393,18 +393,30 @@ impl Group {
     }
 }
 
-pub fn match_regex(input_line: &str, regex: &str) -> Option<String> {
-    find_all_regex(input_line, regex).into_iter().next()
+#[derive(Debug)]
+pub struct RegexMatch {
+    pub start: usize,
+    pub text: String,
 }
 
 pub fn find_all_regex(input_line: &str, regex: &str) -> Vec<String> {
+    find_all_regex_spans(input_line, regex)
+        .into_iter()
+        .map(|matched| matched.text)
+        .collect()
+}
+
+pub fn find_all_regex_spans(input_line: &str, regex: &str) -> Vec<RegexMatch> {
     let input_str = input_line.trim();
     let (patterns, start, end) = Pattern::parse(regex);
     let mut matches = Vec::new();
 
     if start {
         if let Some(matched) = match_from(input_str, &patterns, end) {
-            matches.push(matched);
+            matches.push(RegexMatch {
+                start: 0,
+                text: matched,
+            });
         }
         return matches;
     }
@@ -412,9 +424,9 @@ pub fn find_all_regex(input_line: &str, regex: &str) -> Vec<String> {
     let mut offset = 0;
     while offset < input_str.len() {
         let slice = &input_str[offset..];
-        let Some(relative_start) = slice.char_indices().next().map(|_| 0) else {
+        if slice.is_empty() {
             break;
-        };
+        }
 
         let mut found = None;
         for (idx, _) in slice.char_indices() {
@@ -423,16 +435,16 @@ pub fn find_all_regex(input_line: &str, regex: &str) -> Vec<String> {
                 break;
             }
         }
-        if found.is_none() && relative_start == 0 && match_from(slice, &patterns, end).is_some() {
-            found = match_from(slice, &patterns, end).map(|matched| (0, matched));
-        }
 
         let Some((start_idx, matched)) = found else {
             break;
         };
 
         let advance = start_idx + matched.len().max(1);
-        matches.push(matched);
+        matches.push(RegexMatch {
+            start: offset + start_idx,
+            text: matched,
+        });
         offset += advance;
     }
 

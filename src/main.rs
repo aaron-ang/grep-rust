@@ -9,7 +9,7 @@ use anyhow::{bail, Result};
 use clap::{Parser, ValueEnum};
 use colored::{control, Colorize};
 
-use grep_rust::{find_all_regex, match_regex};
+use grep_rust::{find_all_regex, find_all_regex_spans, RegexMatch};
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ColorMode {
@@ -39,16 +39,17 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    control::set_override(match args.color {
+    let use_color = match args.color {
         ColorMode::Always => true,
         ColorMode::Auto => io::stdout().is_terminal(),
         ColorMode::Never => false,
-    });
+    };
+    control::set_override(use_color);
 
     let match_count = if args.files.is_empty() {
         let stdin = io::stdin();
         let reader = BufReader::new(stdin.lock());
-        process_lines(reader, &args.pattern, None, args.only_matching, args.color)?
+        process_lines(reader, &args.pattern, None, args.only_matching, use_color)?
     } else {
         let file_paths = collect_files(&args.files, args.recursive)?;
         let mut total = 0;
@@ -57,13 +58,7 @@ fn main() -> Result<()> {
             let file = File::open(&file_path)?;
             let reader = BufReader::new(file);
             let prefix = show_prefix.then_some(file_path.to_str().unwrap());
-            total += process_lines(
-                reader,
-                &args.pattern,
-                prefix,
-                args.only_matching,
-                args.color,
-            )?;
+            total += process_lines(reader, &args.pattern, prefix, args.only_matching, use_color)?;
         }
         total
     };
@@ -76,7 +71,7 @@ fn process_lines<R: BufRead>(
     pattern: &str,
     filename: Option<&str>,
     only_matching: bool,
-    color: ColorMode,
+    use_color: bool,
 ) -> Result<usize> {
     let mut match_count = 0;
     let prefix = filename.map(|s| format!("{s}:")).unwrap_or_default();
@@ -88,38 +83,34 @@ fn process_lines<R: BufRead>(
             for matched in matches {
                 println!("{prefix}{matched}");
             }
-        } else if let Some(matched) = match_regex(&line, pattern) {
-            match_count += 1;
-
-            let output = render_match(&line, &matched, &prefix, color);
-
-            println!("{output}");
+        } else {
+            let matches = find_all_regex_spans(&line, pattern);
+            if !matches.is_empty() {
+                match_count += 1;
+                println!("{}", render_matches(&line, &prefix, use_color, &matches));
+            }
         }
     }
     Ok(match_count)
 }
 
-fn render_match(line: &str, matched: &str, prefix: &str, color: ColorMode) -> String {
-    match line.find(matched) {
-        Some(start) => {
-            let end = start + matched.len();
-            let highlighted = match color {
-                ColorMode::Always | ColorMode::Auto if io::stdout().is_terminal() => {
-                    matched.red().bold().to_string()
-                }
-                ColorMode::Always => matched.red().bold().to_string(),
-                ColorMode::Auto | ColorMode::Never => matched.to_string(),
-            };
-            format!(
-                "{}{}{}{}",
-                prefix,
-                &line[..start],
-                highlighted,
-                &line[end..]
-            )
-        }
-        None => format!("{prefix}{line}"),
+fn render_matches(line: &str, prefix: &str, use_color: bool, matches: &[RegexMatch]) -> String {
+    if matches.is_empty() || !use_color {
+        return format!("{prefix}{line}");
     }
+
+    let mut output = String::with_capacity(prefix.len() + line.len());
+    output.push_str(prefix);
+
+    let mut last = 0;
+    for matched in matches {
+        let end = matched.start + matched.text.len();
+        output.push_str(&line[last..matched.start]);
+        output.push_str(&matched.text.red().bold().to_string());
+        last = end;
+    }
+    output.push_str(&line[last..]);
+    output
 }
 
 fn collect_files(inputs: &[PathBuf], recursive: bool) -> Result<Vec<PathBuf>> {
