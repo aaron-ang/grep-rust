@@ -6,21 +6,25 @@
   <line x1="90" y1="60" x2="90" y2="410" stroke="#1f2933" stroke-width="2" />
   <line x1="90" y1="410.0" x2="960" y2="410.0" stroke="#d8dee9" stroke-width="1" />
   <text x="78" y="414.0" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">0</text>
-  <line x1="90" y1="293.3" x2="960" y2="293.3" stroke="#d8dee9" stroke-width="1" />
-  <text x="78" y="297.3" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">50</text>
-  <line x1="90" y1="176.7" x2="960" y2="176.7" stroke="#d8dee9" stroke-width="1" />
-  <text x="78" y="180.7" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">100</text>
+  <line x1="90" y1="340.0" x2="960" y2="340.0" stroke="#d8dee9" stroke-width="1" />
+  <text x="78" y="344.0" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">20</text>
+  <line x1="90" y1="270.0" x2="960" y2="270.0" stroke="#d8dee9" stroke-width="1" />
+  <text x="78" y="274.0" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">40</text>
+  <line x1="90" y1="200.0" x2="960" y2="200.0" stroke="#d8dee9" stroke-width="1" />
+  <text x="78" y="204.0" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">60</text>
+  <line x1="90" y1="130.0" x2="960" y2="130.0" stroke="#d8dee9" stroke-width="1" />
+  <text x="78" y="134.0" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">80</text>
   <line x1="90" y1="60.0" x2="960" y2="60.0" stroke="#d8dee9" stroke-width="1" />
-  <text x="78" y="64.0" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">150</text>
-  <rect x="198.8" y="90.5" width="217.5" height="319.5" fill="#c26a2d" rx="6" />
-  <line x1="307.5" y1="82.1" x2="307.5" y2="98.9" stroke="#102a43" stroke-width="2" />
-  <line x1="299.5" y1="82.1" x2="315.5" y2="82.1" stroke="#102a43" stroke-width="2" />
-  <line x1="299.5" y1="98.9" x2="315.5" y2="98.9" stroke="#102a43" stroke-width="2" />
+  <text x="78" y="64.0" font-size="12" font-family="Helvetica, Arial, sans-serif" fill="#5b6c7d" text-anchor="end">100</text>
+  <rect x="198.8" y="281.4" width="217.5" height="128.6" fill="#c26a2d" rx="6" />
+  <line x1="307.5" y1="274.9" x2="307.5" y2="287.8" stroke="#102a43" stroke-width="2" />
+  <line x1="299.5" y1="274.9" x2="315.5" y2="274.9" stroke="#102a43" stroke-width="2" />
+  <line x1="299.5" y1="287.8" x2="315.5" y2="287.8" stroke="#102a43" stroke-width="2" />
   <text x="307.5" y="438" font-size="13" font-family="Helvetica, Arial, sans-serif" fill="#243b53" text-anchor="middle">grep-rust</text>
-  <rect x="633.8" y="232.5" width="217.5" height="177.5" fill="#3d6b99" rx="6" />
-  <line x1="742.5" y1="216.5" x2="742.5" y2="248.6" stroke="#102a43" stroke-width="2" />
-  <line x1="734.5" y1="216.5" x2="750.5" y2="216.5" stroke="#102a43" stroke-width="2" />
-  <line x1="734.5" y1="248.6" x2="750.5" y2="248.6" stroke="#102a43" stroke-width="2" />
+  <rect x="633.8" y="135.9" width="217.5" height="274.1" fill="#3d6b99" rx="6" />
+  <line x1="742.5" y1="65.0" x2="742.5" y2="206.7" stroke="#102a43" stroke-width="2" />
+  <line x1="734.5" y1="65.0" x2="750.5" y2="65.0" stroke="#102a43" stroke-width="2" />
+  <line x1="734.5" y1="206.7" x2="750.5" y2="206.7" stroke="#102a43" stroke-width="2" />
   <text x="742.5" y="438" font-size="13" font-family="Helvetica, Arial, sans-serif" fill="#243b53" text-anchor="middle">grep baseline</text>
   <text x="20" y="40" font-size="14" font-family="Helvetica, Arial, sans-serif" fill="#243b53">Mean time (ms)</text>
   <text x="500.0" y="460" font-size="14" font-family="Helvetica, Arial, sans-serif" fill="#243b53" text-anchor="middle">Benchmark target</text>

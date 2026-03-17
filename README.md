@@ -1,45 +1,73 @@
+# grep-rust
+
+A small `grep` implementation in Rust with a custom regex engine, recursive file search, only-match output, ANSI highlighting, and a benchmark workflow against system `grep`.
+
 [![progress-banner](https://backend.codecrafters.io/progress/grep/d5fac5b9-9540-466c-9d43-83878a8eefe6)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
 
-This is a starting point for Rust solutions to the
-["Build Your Own grep" Challenge](https://app.codecrafters.io/courses/grep/overview).
+## Features
 
-[Regular expressions](https://en.wikipedia.org/wiki/Regular_expression)
-(Regexes, for short) are patterns used to match character combinations in
-strings. [`grep`](https://en.wikipedia.org/wiki/Grep) is a CLI tool for
-searching using Regexes.
+### CLI
 
-In this challenge you'll build your own implementation of `grep`. Along the way
-we'll learn about Regex syntax, how parsers/lexers work, and how regular
-expressions are evaluated.
+- Search stdin or one or more files
+- Recursive directory traversal with `-r`
+- Print only matched text with `-o`
+- Highlight matches with `--color=always|auto|never`
+- Exit with code `0` when at least one match is found, `1` otherwise
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+### Regex engine
 
-# Passing the first stage
+- Literal characters
+- Wildcard `.`
+- Character classes `\d` and `\w`
+- Character groups like `[abc]` and negated groups like `[^abc]`
+- Anchors `^` and `$`
+- Quantifiers `?`, `+`, `*`, `{n}`, `{n,}`, `{n,m}`
+- Grouping and alternation with `(...)` and `|`
+- Backreferences like `\1`
 
-The entry point for your `grep` implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+## Usage
+
+Run against stdin:
 
 ```sh
-git add .
-git commit -m "pass 1st stage" # any msg
-git push origin master
+echo 'The king had 10 children' | cargo run -- -E '\d+'
 ```
 
-Time to move on to the next stage!
+Search files:
 
-# Stage 2 & beyond
+```sh
+cargo run -- -E 'hello\d+' path/to/file.txt
+```
 
-Note: This section is for stages 2 and beyond.
+Recursive search:
 
-1. Ensure you have `cargo (1.62)` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+```sh
+cargo run -- -r -E 'hello\d+' src
+```
 
-# Benchmarking
+Only matching output:
+
+```sh
+echo 'jekyll and hyde' | cargo run -- -o -E '(jekyll|hyde)'
+```
+
+Highlighted output:
+
+```sh
+echo 'I have 3 apples' | cargo run -- --color=always -E '\d'
+```
+
+## Development
+
+Format, lint, and test:
+
+```sh
+cargo fmt
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+```
+
+## Benchmarking
 
 Install `hyperfine` locally:
 
@@ -53,16 +81,34 @@ Generate a synthetic corpus:
 ./scripts/gen-bench-data.sh
 ```
 
-Run the benchmark and generate an SVG plot:
+Run the benchmark and generate an SVG chart:
 
 ```sh
-python3 scripts/bench.py
+./scripts/bench.py
 ```
 
-This writes `bench/benchmark.svg`.
+By default this benchmarks `grep-rust` against system `grep` on `bench/data.txt` and writes:
 
-You can also override the regex pattern and input file:
+```text
+bench/benchmark.svg
+```
+
+You can override the regex pattern and input file:
 
 ```sh
-python3 scripts/bench.py 'user_\d+' bench/data.txt
+./scripts/bench.py 'user_\d+' bench/data.txt
 ```
+
+## Benchmark Chart
+
+![Benchmark comparison](bench/benchmark.svg)
+
+## Optimization Notes
+
+The current implementation is competitive with system `grep` mainly because it avoids unnecessary work:
+
+- Regexes are compiled once and reused across lines
+- Matching stays on byte spans, with a fast path for patterns that do not need captures
+- Fixed literal prefixes and buffered output help cut down scanning and printing overhead
+
+The exact benchmark result is still workload-dependent, so some patterns will benefit more than others.

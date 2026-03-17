@@ -509,6 +509,7 @@ fn match_spans_report_positions() {
 fn compiled_regex_can_be_reused() {
     let compiled = compile_regex(r"\d");
     assert!(!compiled.needs_captures());
+    assert_eq!(compiled.literal_prefix(), None);
     assert_eq!(
         find_all_regex_spans_compiled("The king had 10 children", &compiled),
         vec![
@@ -523,9 +524,14 @@ fn compiled_regex_can_be_reused() {
 
     let grouped = compile_regex(r"(jekyll|hyde)");
     assert!(grouped.needs_captures());
+    assert_eq!(grouped.literal_prefix(), None);
 
     let backreference = compile_regex(r"(\w+) and \1");
     assert!(backreference.needs_captures());
+    assert_eq!(backreference.literal_prefix(), None);
+
+    let prefixed = compile_regex(r"hello\d+");
+    assert_eq!(prefixed.literal_prefix(), Some("hello"));
 }
 
 #[test]
@@ -549,4 +555,30 @@ fn complex_quantifier_combinations() {
         Some("LOG INFO 21 apple".to_string())
     );
     assert!(first_match("LOG info 85 apple", r"^LOG [FION]* \d+ (apple|peas)$").is_none());
+}
+
+#[test]
+fn equivalent_capture_and_no_capture_paths_match_the_same_span() {
+    let plain = compile_regex(r"a+b");
+    let grouped = compile_regex(r"(a+)b");
+
+    assert!(!plain.needs_captures());
+    assert!(grouped.needs_captures());
+    assert_eq!(
+        find_all_regex_spans_compiled("xxaaabyy", &plain),
+        find_all_regex_spans_compiled("xxaaabyy", &grouped)
+    );
+}
+
+#[test]
+fn quantified_groups_do_not_loop_on_zero_progress() {
+    let grouped = compile_regex(r"(a?)*b");
+    assert_eq!(
+        find_all_regex_spans_compiled("bbb", &grouped),
+        vec![
+            RegexMatch { start: 0, end: 1 },
+            RegexMatch { start: 1, end: 2 },
+            RegexMatch { start: 2, end: 3 },
+        ]
+    );
 }
