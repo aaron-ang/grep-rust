@@ -54,11 +54,25 @@ impl Pattern {
             | Pattern::Digit(count)
             | Pattern::Alphanumeric(count)
             | Pattern::Wildcard(count)
-            | Pattern::CharGroup(_, count) => *count,
-            Pattern::Alternation { count, .. } => *count,
-            Pattern::CapturedGroup { count, .. } => *count,
+            | Pattern::CharGroup(_, count)
+            | Pattern::Alternation { count, .. }
+            | Pattern::CapturedGroup { count, .. } => *count,
             Pattern::Backreference(_) => Count::One,
         }
+    }
+
+    fn uses_capture_engine(&self) -> bool {
+        matches!(
+            self,
+            Pattern::Alternation { .. } | Pattern::CapturedGroup { .. } | Pattern::Backreference(_)
+        )
+    }
+
+    fn modifies_captures(&self) -> bool {
+        matches!(
+            self,
+            Pattern::Alternation { .. } | Pattern::CapturedGroup { .. }
+        )
     }
 }
 
@@ -74,64 +88,15 @@ pub enum Count {
 }
 
 impl Count {
-    fn repetition_limit(self) -> Option<usize> {
+    fn repetition_bounds(self) -> (usize, Option<usize>) {
         match self {
-            Count::One => Some(1),
-            Count::OneOrMore => None,
-            Count::ZeroOrOne => Some(1),
-            Count::ZeroOrMore => None,
-            Count::Exact(n) => Some(n),
-            Count::AtLeast(_) => None,
-            Count::Range(_, max) => Some(max),
-        }
-    }
-
-    fn candidate_counts(self, max_available: usize) -> Vec<usize> {
-        match self {
-            Count::One => (max_available >= 1).then_some(vec![1]).unwrap_or_default(),
-            Count::ZeroOrOne => {
-                if max_available >= 1 {
-                    vec![1]
-                } else {
-                    vec![0]
-                }
-            }
-            Count::OneOrMore => {
-                if max_available == 0 {
-                    Vec::new()
-                } else {
-                    let mut counts = vec![max_available];
-                    counts.extend(1..max_available);
-                    counts
-                }
-            }
-            Count::ZeroOrMore => {
-                if max_available == 0 {
-                    vec![0]
-                } else {
-                    let mut counts = vec![max_available];
-                    counts.extend(1..max_available);
-                    counts
-                }
-            }
-            Count::Exact(n) => (max_available >= n).then_some(vec![n]).unwrap_or_default(),
-            Count::AtLeast(min) => {
-                if max_available < min {
-                    Vec::new()
-                } else {
-                    let mut counts = vec![max_available];
-                    counts.extend(min..max_available);
-                    counts
-                }
-            }
-            Count::Range(min, max) => {
-                let capped = max_available.min(max);
-                if capped < min {
-                    Vec::new()
-                } else {
-                    (min..=capped).rev().collect()
-                }
-            }
+            Count::One => (1, Some(1)),
+            Count::OneOrMore => (1, None),
+            Count::ZeroOrOne => (0, Some(1)),
+            Count::ZeroOrMore => (0, None),
+            Count::Exact(n) => (n, Some(n)),
+            Count::AtLeast(min) => (min, None),
+            Count::Range(min, max) => (min, Some(max)),
         }
     }
 }
@@ -157,7 +122,7 @@ impl CharGroup {
         }
     }
 
-    fn matches(self: &CharGroup, c: char) -> bool {
+    fn matches(&self, c: char) -> bool {
         c.is_ascii_alphanumeric() && (self.ascii_members[c as usize] ^ self.negated)
     }
 }
@@ -167,16 +132,23 @@ pub struct CompiledRegex {
     patterns: Vec<Pattern>,
     start_anchor: bool,
     end_anchor: bool,
+    needs_captures: bool,
 }
 
 impl CompiledRegex {
     pub fn new(regex: &str) -> Self {
         let (patterns, start_anchor, end_anchor) = Pattern::parse(regex);
+        let needs_captures = patterns.iter().any(Pattern::uses_capture_engine);
         Self {
             patterns,
             start_anchor,
             end_anchor,
+            needs_captures,
         }
+    }
+
+    pub(crate) fn needs_captures(&self) -> bool {
+        self.needs_captures
     }
 }
 
@@ -190,14 +162,6 @@ pub struct RegexMatch {
 pub struct CaptureSpan {
     start: usize,
     end: usize,
-}
-
-type Captures = Vec<Option<CaptureSpan>>;
-
-#[derive(Clone)]
-struct MatchState {
-    pos: usize,
-    captures: Captures,
 }
 
 pub fn compile_regex(regex: &str) -> CompiledRegex {
@@ -231,8 +195,13 @@ pub fn find_all_regex_spans_compiled(input_line: &str, regex: &CompiledRegex) ->
 }
 
 fn match_from(regex: &CompiledRegex, input: &str, start: usize) -> Option<usize> {
-    let captures = Vec::new();
-    let (end, _) = match_patterns(input, &regex.patterns, start, &captures)?;
+    let end = if regex.needs_captures() {
+        let (end, _) = match_patterns_with_captures(input, &regex.patterns, start, Vec::new())?;
+        end
+    } else {
+        match_patterns_without_captures(input, &regex.patterns, start)?
+    };
+
     if !regex.end_anchor || end == input.len() {
         Some(end)
     } else {
@@ -240,140 +209,307 @@ fn match_from(regex: &CompiledRegex, input: &str, start: usize) -> Option<usize>
     }
 }
 
-fn match_patterns(
-    input: &str,
-    patterns: &[Pattern],
-    pos: usize,
-    captures: &Captures,
-) -> Option<(usize, Captures)> {
+fn match_patterns_without_captures(input: &str, patterns: &[Pattern], pos: usize) -> Option<usize> {
     if patterns.is_empty() {
-        return Some((pos, captures.clone()));
+        return Some(pos);
     }
 
     let pattern = &patterns[0];
     match pattern.count() {
-        Count::One => {
-            let state = match_single(pattern, input, pos, captures)?;
-            return match_patterns(input, &patterns[1..], state.pos, &state.captures);
+        Count::One | Count::Exact(1) => {
+            let next = match_single_without_captures(pattern, input, pos)?;
+            match_patterns_without_captures(input, &patterns[1..], next)
         }
         Count::ZeroOrOne => {
-            if let Some(state) = match_single(pattern, input, pos, captures) {
-                return match_patterns(input, &patterns[1..], state.pos, &state.captures);
+            if let Some(next) = match_single_without_captures(pattern, input, pos) {
+                if let Some(end) = match_patterns_without_captures(input, &patterns[1..], next) {
+                    return Some(end);
+                }
             }
-            return match_patterns(input, &patterns[1..], pos, captures);
+            match_patterns_without_captures(input, &patterns[1..], pos)
         }
-        Count::Exact(1) => {
-            let state = match_single(pattern, input, pos, captures)?;
-            return match_patterns(input, &patterns[1..], state.pos, &state.captures);
+        _ => match_quantified_without_captures(input, patterns, pos),
+    }
+}
+
+fn match_quantified_without_captures(
+    input: &str,
+    patterns: &[Pattern],
+    pos: usize,
+) -> Option<usize> {
+    let pattern = &patterns[0];
+    let remaining = &patterns[1..];
+    let (min, max) = pattern.count().repetition_bounds();
+    let mut checkpoints = Vec::new();
+    let mut current = pos;
+
+    while max.is_none_or(|limit| checkpoints.len() < limit) {
+        let Some(next) = match_single_without_captures(pattern, input, current) else {
+            break;
+        };
+
+        let made_progress = next != current;
+        checkpoints.push(next);
+        current = next;
+
+        if !made_progress {
+            break;
         }
-        _ => {}
     }
 
-    let states = collect_match_states(input, pattern, pos, captures);
-    let max_available = states.len().saturating_sub(1);
+    if checkpoints.len() < min {
+        return None;
+    }
 
-    for count in pattern.count().candidate_counts(max_available) {
-        let state = &states[count];
-        if let Some((end, final_captures)) =
-            match_patterns(input, &patterns[1..], state.pos, &state.captures)
-        {
-            return Some((end, final_captures));
+    for count in (min..=checkpoints.len()).rev() {
+        let candidate_pos = if count == 0 {
+            pos
+        } else {
+            checkpoints[count - 1]
+        };
+        if let Some(end) = match_patterns_without_captures(input, remaining, candidate_pos) {
+            return Some(end);
         }
     }
 
     None
 }
 
-fn collect_match_states(
-    input: &str,
-    pattern: &Pattern,
-    pos: usize,
-    captures: &Captures,
-) -> Vec<MatchState> {
-    let max = pattern.count().repetition_limit();
-    let mut states = vec![MatchState {
-        pos,
-        captures: captures.clone(),
-    }];
+type Captures = Vec<Option<CaptureSpan>>;
 
-    while max.is_none_or(|limit| states.len() - 1 < limit) {
-        let previous = states.last().unwrap().clone();
-        let Some(next) = match_single(pattern, input, previous.pos, &previous.captures) else {
+fn match_patterns_with_captures(
+    input: &str,
+    patterns: &[Pattern],
+    pos: usize,
+    captures: Captures,
+) -> Option<(usize, Captures)> {
+    if patterns.is_empty() {
+        return Some((pos, captures));
+    }
+
+    let pattern = &patterns[0];
+    if !pattern.modifies_captures() {
+        return match_non_modifying_pattern(input, patterns, pos, captures);
+    }
+
+    match pattern.count() {
+        Count::One | Count::Exact(1) => {
+            let (next, next_captures) = match_single_with_captures(pattern, input, pos, captures)?;
+            match_patterns_with_captures(input, &patterns[1..], next, next_captures)
+        }
+        Count::ZeroOrOne => {
+            let original = captures;
+            if let Some((next, next_captures)) =
+                match_single_with_captures(pattern, input, pos, original.clone())
+            {
+                if let Some(result) =
+                    match_patterns_with_captures(input, &patterns[1..], next, next_captures)
+                {
+                    return Some(result);
+                }
+            }
+            match_patterns_with_captures(input, &patterns[1..], pos, original)
+        }
+        _ => match_quantified_with_captures(input, patterns, pos, captures),
+    }
+}
+
+fn match_non_modifying_pattern(
+    input: &str,
+    patterns: &[Pattern],
+    pos: usize,
+    captures: Captures,
+) -> Option<(usize, Captures)> {
+    let pattern = &patterns[0];
+    match pattern.count() {
+        Count::One | Count::Exact(1) => {
+            let next = match_single_reusing_captures(pattern, input, pos, &captures)?;
+            match_patterns_with_captures(input, &patterns[1..], next, captures)
+        }
+        Count::ZeroOrOne => {
+            if let Some(next) = match_single_reusing_captures(pattern, input, pos, &captures) {
+                if let Some(result) =
+                    match_patterns_with_captures(input, &patterns[1..], next, captures.clone())
+                {
+                    return Some(result);
+                }
+            }
+            match_patterns_with_captures(input, &patterns[1..], pos, captures)
+        }
+        _ => match_quantified_without_capture_changes(input, patterns, pos, captures),
+    }
+}
+
+fn match_quantified_without_capture_changes(
+    input: &str,
+    patterns: &[Pattern],
+    pos: usize,
+    captures: Captures,
+) -> Option<(usize, Captures)> {
+    let pattern = &patterns[0];
+    let remaining = &patterns[1..];
+    let (min, max) = pattern.count().repetition_bounds();
+    let mut checkpoints = Vec::new();
+    let mut current = pos;
+
+    while max.is_none_or(|limit| checkpoints.len() < limit) {
+        let Some(next) = match_single_reusing_captures(pattern, input, current, &captures) else {
             break;
         };
 
-        if next.pos == previous.pos && max.is_none() {
-            break;
-        }
+        let made_progress = next != current;
+        checkpoints.push(next);
+        current = next;
 
-        states.push(next);
-
-        if states.last().unwrap().pos == previous.pos {
+        if !made_progress {
             break;
         }
     }
 
-    states
+    if checkpoints.len() < min {
+        return None;
+    }
+
+    for count in (min..=checkpoints.len()).rev() {
+        let candidate_pos = if count == 0 {
+            pos
+        } else {
+            checkpoints[count - 1]
+        };
+        if let Some(result) =
+            match_patterns_with_captures(input, remaining, candidate_pos, captures.clone())
+        {
+            return Some(result);
+        }
+    }
+
+    None
 }
 
-fn match_single(
+fn match_quantified_with_captures(
+    input: &str,
+    patterns: &[Pattern],
+    pos: usize,
+    captures: Captures,
+) -> Option<(usize, Captures)> {
+    let pattern = &patterns[0];
+    let remaining = &patterns[1..];
+    let (min, max) = pattern.count().repetition_bounds();
+    let original = captures;
+    let mut checkpoints = Vec::new();
+    let mut current_pos = pos;
+    let mut current_captures = original.clone();
+
+    while max.is_none_or(|limit| checkpoints.len() < limit) {
+        let Some((next_pos, next_captures)) =
+            match_single_with_captures(pattern, input, current_pos, current_captures)
+        else {
+            break;
+        };
+
+        let made_progress = next_pos != current_pos;
+        checkpoints.push((next_pos, next_captures.clone()));
+        current_pos = next_pos;
+        current_captures = next_captures;
+
+        if !made_progress {
+            break;
+        }
+    }
+
+    if checkpoints.len() < min {
+        return None;
+    }
+
+    for count in (min..=checkpoints.len()).rev() {
+        let (candidate_pos, candidate_captures) = if count == 0 {
+            (pos, original.clone())
+        } else {
+            checkpoints[count - 1].clone()
+        };
+
+        if let Some(result) =
+            match_patterns_with_captures(input, remaining, candidate_pos, candidate_captures)
+        {
+            return Some(result);
+        }
+    }
+
+    None
+}
+
+fn match_single_without_captures(pattern: &Pattern, input: &str, pos: usize) -> Option<usize> {
+    match pattern {
+        Pattern::Literal(literal, _) => match_char(input, pos, |c| c == *literal),
+        Pattern::Digit(_) => match_char(input, pos, |c| c.is_ascii_digit()),
+        Pattern::Alphanumeric(_) => {
+            match_char(input, pos, |c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        Pattern::Wildcard(_) => {
+            let restricted_chars = "\\[](|)";
+            match_char(input, pos, |c| !restricted_chars.contains(c))
+        }
+        Pattern::CharGroup(group, _) => match_char(input, pos, |c| group.matches(c)),
+        Pattern::Alternation { .. } | Pattern::CapturedGroup { .. } | Pattern::Backreference(_) => {
+            unreachable!("capture-aware patterns must use the capture engine")
+        }
+    }
+}
+
+fn match_single_reusing_captures(
     pattern: &Pattern,
     input: &str,
     pos: usize,
     captures: &Captures,
-) -> Option<MatchState> {
+) -> Option<usize> {
     match pattern {
-        Pattern::Literal(literal, _) => {
-            match_char(input, pos, |c| c == *literal).map(|next| MatchState {
-                pos: next,
-                captures: captures.clone(),
-            })
+        Pattern::Literal(literal, _) => match_char(input, pos, |c| c == *literal),
+        Pattern::Digit(_) => match_char(input, pos, |c| c.is_ascii_digit()),
+        Pattern::Alphanumeric(_) => {
+            match_char(input, pos, |c| c.is_ascii_alphanumeric() || c == '_')
         }
-        Pattern::Digit(_) => {
-            match_char(input, pos, |c| c.is_ascii_digit()).map(|next| MatchState {
-                pos: next,
-                captures: captures.clone(),
-            })
-        }
-        Pattern::Alphanumeric(_) => match_char(input, pos, |c| {
-            c.is_ascii_alphanumeric() || c == '_'
-        })
-        .map(|next| MatchState {
-            pos: next,
-            captures: captures.clone(),
-        }),
         Pattern::Wildcard(_) => {
             let restricted_chars = "\\[](|)";
-            match_char(input, pos, |c| !restricted_chars.contains(c)).map(|next| MatchState {
-                pos: next,
-                captures: captures.clone(),
-            })
+            match_char(input, pos, |c| !restricted_chars.contains(c))
         }
-        Pattern::CharGroup(group, _) => {
-            match_char(input, pos, |c| group.matches(c)).map(|next| MatchState {
-                pos: next,
-                captures: captures.clone(),
-            })
+        Pattern::CharGroup(group, _) => match_char(input, pos, |c| group.matches(c)),
+        Pattern::Backreference(index) => match_backreference(input, pos, *index, captures),
+        Pattern::Alternation { .. } | Pattern::CapturedGroup { .. } => {
+            unreachable!("capture-modifying patterns need owned captures")
+        }
+    }
+}
+
+fn match_single_with_captures(
+    pattern: &Pattern,
+    input: &str,
+    pos: usize,
+    captures: Captures,
+) -> Option<(usize, Captures)> {
+    match pattern {
+        Pattern::Literal(_, _)
+        | Pattern::Digit(_)
+        | Pattern::Alphanumeric(_)
+        | Pattern::Wildcard(_)
+        | Pattern::CharGroup(_, _)
+        | Pattern::Backreference(_) => {
+            let next = match_single_reusing_captures(pattern, input, pos, &captures)?;
+            Some((next, captures))
         }
         Pattern::Alternation {
             alternatives, idx, ..
         } => alternatives.iter().find_map(|alternative| {
-            let (end, mut next_captures) = match_patterns(input, alternative, pos, captures)?;
+            let (end, mut next_captures) =
+                match_patterns_with_captures(input, alternative, pos, captures.clone())?;
             set_capture(&mut next_captures, *idx, CaptureSpan { start: pos, end });
-            Some(MatchState {
-                pos: end,
-                captures: next_captures,
-            })
+            Some((end, next_captures))
         }),
         Pattern::CapturedGroup { patterns, idx, .. } => {
-            let (end, mut next_captures) = match_patterns(input, patterns, pos, captures)?;
+            let (end, mut next_captures) =
+                match_patterns_with_captures(input, patterns, pos, captures)?;
             set_capture(&mut next_captures, *idx, CaptureSpan { start: pos, end });
-            Some(MatchState {
-                pos: end,
-                captures: next_captures,
-            })
+            Some((end, next_captures))
         }
-        Pattern::Backreference(index) => match_backreference(input, pos, *index, captures),
     }
 }
 
@@ -382,13 +518,12 @@ fn match_backreference(
     pos: usize,
     index: usize,
     captures: &Captures,
-) -> Option<MatchState> {
+) -> Option<usize> {
     let capture = captures.get(index - 1).copied().flatten()?;
     let matched = &input[capture.start..capture.end];
-    input[pos..].starts_with(matched).then_some(MatchState {
-        pos: pos + matched.len(),
-        captures: captures.clone(),
-    })
+    input[pos..]
+        .starts_with(matched)
+        .then_some(pos + matched.len())
 }
 
 fn set_capture(captures: &mut Captures, idx: usize, span: CaptureSpan) {

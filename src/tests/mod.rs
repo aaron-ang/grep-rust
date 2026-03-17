@@ -508,6 +508,7 @@ fn match_spans_report_positions() {
 #[test]
 fn compiled_regex_can_be_reused() {
     let compiled = compile_regex(r"\d");
+    assert!(!compiled.needs_captures());
     assert_eq!(
         find_all_regex_spans_compiled("The king had 10 children", &compiled),
         vec![
@@ -519,6 +520,12 @@ fn compiled_regex_can_be_reused() {
         find_all_regex_spans_compiled("No digits here", &compiled),
         Vec::new()
     );
+
+    let grouped = compile_regex(r"(jekyll|hyde)");
+    assert!(grouped.needs_captures());
+
+    let backreference = compile_regex(r"(\w+) and \1");
+    assert!(backreference.needs_captures());
 }
 
 #[test]

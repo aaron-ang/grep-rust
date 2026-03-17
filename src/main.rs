@@ -7,9 +7,11 @@ use std::{
 
 use anyhow::{bail, Result};
 use clap::{Parser, ValueEnum};
-use colored::{control, Colorize};
 
 use grep_rust::{compile_regex, find_all_regex_spans_compiled, CompiledRegex, RegexMatch};
+
+const ANSI_BOLD_RED: &[u8] = b"\x1b[1;31m";
+const ANSI_RESET: &[u8] = b"\x1b[0m";
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ColorMode {
@@ -45,7 +47,6 @@ fn main() -> Result<()> {
         ColorMode::Auto => io::stdout().is_terminal(),
         ColorMode::Never => false,
     };
-    control::set_override(use_color);
     let stdout = io::stdout();
     let mut writer = BufWriter::new(stdout.lock());
 
@@ -133,13 +134,9 @@ fn write_rendered_line<W: Write>(
     let mut last = 0;
     for matched in matches {
         writer.write_all(&line.as_bytes()[last..matched.start])?;
-        writer.write_all(
-            line[matched.start..matched.end]
-                .red()
-                .bold()
-                .to_string()
-                .as_bytes(),
-        )?;
+        writer.write_all(ANSI_BOLD_RED)?;
+        writer.write_all(&line.as_bytes()[matched.start..matched.end])?;
+        writer.write_all(ANSI_RESET)?;
         last = matched.end;
     }
     writer.write_all(&line.as_bytes()[last..])?;
@@ -175,4 +172,49 @@ fn collect_dir(dir: &Path) -> Result<Vec<PathBuf>> {
         }
     }
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_single_ansi_highlight() {
+        let mut output = Vec::new();
+        write_rendered_line(
+            &mut output,
+            "I have 3 apples",
+            "",
+            true,
+            &[RegexMatch { start: 7, end: 8 }],
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "I have \x1b[1;31m3\x1b[0m apples\n"
+        );
+    }
+
+    #[test]
+    fn writes_multiple_ansi_highlights() {
+        let mut output = Vec::new();
+        write_rendered_line(
+            &mut output,
+            "a1b2c3",
+            "",
+            true,
+            &[
+                RegexMatch { start: 1, end: 2 },
+                RegexMatch { start: 3, end: 4 },
+                RegexMatch { start: 5, end: 6 },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "a\x1b[1;31m1\x1b[0mb\x1b[1;31m2\x1b[0mc\x1b[1;31m3\x1b[0m\n"
+        );
+    }
 }
