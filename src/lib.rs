@@ -2,4 +2,4 @@ mod parser;
 mod pattern;
 mod tests;
 
-pub use pattern::match_regex;
+pub use pattern::{find_all_regex, match_regex};

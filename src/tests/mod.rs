@@ -143,6 +143,23 @@ fn wildcard_matching() {
 }
 
 #[test]
+fn multiple_only_matches() {
+    assert_eq!(
+        find_all_regex("The king had 10 children", r"\d"),
+        vec!["1".to_string(), "0".to_string()]
+    );
+    assert_eq!(
+        find_all_regex("The king had 10 children", r"\d\d"),
+        vec!["10".to_string()]
+    );
+    assert_eq!(
+        find_all_regex("jekyll and hyde", "(jekyll|hyde)"),
+        vec!["jekyll".to_string(), "hyde".to_string()]
+    );
+    assert!(find_all_regex("no match here", r"\d").is_empty());
+}
+
+#[test]
 fn digit_matching() {
     assert_eq!(match_regex("123", r"\d"), Some("1".to_string()));
     assert!(match_regex("apple", r"\d").is_none());

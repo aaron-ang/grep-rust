@@ -9,7 +9,7 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use colored::Colorize;
 
-use grep_rust::match_regex;
+use grep_rust::{find_all_regex, match_regex};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -59,25 +59,27 @@ fn process_lines<R: BufRead>(
     let prefix = filename.map(|s| format!("{s}:")).unwrap_or_default();
     for line in reader.lines() {
         let line = line?;
-        if let Some(matched) = match_regex(&line, pattern) {
+        if only_matching {
+            let matches = find_all_regex(&line, pattern);
+            match_count += matches.len();
+            for matched in matches {
+                println!("{prefix}{matched}");
+            }
+        } else if let Some(matched) = match_regex(&line, pattern) {
             match_count += 1;
 
-            let output = if only_matching {
-                format!("{prefix}{matched}")
-            } else {
-                match line.find(&matched) {
-                    Some(start) => {
-                        let end = start + matched.len();
-                        format!(
-                            "{}{}{}{}",
-                            prefix,
-                            &line[..start],
-                            &line[start..end].bright_red().bold(),
-                            &line[end..]
-                        )
-                    }
-                    None => format!("{prefix}{line}"),
+            let output = match line.find(&matched) {
+                Some(start) => {
+                    let end = start + matched.len();
+                    format!(
+                        "{}{}{}{}",
+                        prefix,
+                        &line[..start],
+                        &line[start..end].bright_red().bold(),
+                        &line[end..]
+                    )
                 }
+                None => format!("{prefix}{line}"),
             };
 
             println!("{output}");

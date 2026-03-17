@@ -394,32 +394,62 @@ impl Group {
 }
 
 pub fn match_regex(input_line: &str, regex: &str) -> Option<String> {
+    find_all_regex(input_line, regex).into_iter().next()
+}
+
+pub fn find_all_regex(input_line: &str, regex: &str) -> Vec<String> {
     let input_str = input_line.trim();
-    let mut input_line = input_str.chars().peekable();
     let (patterns, start, end) = Pattern::parse(regex);
+    let mut matches = Vec::new();
+
+    if start {
+        if let Some(matched) = match_from(input_str, &patterns, end) {
+            matches.push(matched);
+        }
+        return matches;
+    }
+
+    let mut offset = 0;
+    while offset < input_str.len() {
+        let slice = &input_str[offset..];
+        let Some(relative_start) = slice.char_indices().next().map(|_| 0) else {
+            break;
+        };
+
+        let mut found = None;
+        for (idx, _) in slice.char_indices() {
+            if let Some(matched) = match_from(&slice[idx..], &patterns, end) {
+                found = Some((idx, matched));
+                break;
+            }
+        }
+        if found.is_none() && relative_start == 0 && match_from(slice, &patterns, end).is_some() {
+            found = match_from(slice, &patterns, end).map(|matched| (0, matched));
+        }
+
+        let Some((start_idx, matched)) = found else {
+            break;
+        };
+
+        let advance = start_idx + matched.len().max(1);
+        matches.push(matched);
+        offset += advance;
+    }
+
+    matches
+}
+
+fn match_from(input: &str, patterns: &[Pattern], end: bool) -> Option<String> {
+    let mut input_line = input.chars().peekable();
 
     let mut groups = Vec::new();
     let mut current_group = String::new();
-
-    loop {
-        let mut input_start = input_line.clone();
-        if match_patterns_with_backtracking(
-            &mut input_start,
-            &patterns,
-            &mut groups,
-            &mut current_group,
-        ) {
-            if end && input_start.peek().is_some() {
-                return None;
-            }
-            return Some(current_group);
-        }
-        if start {
-            return None;
-        }
-        input_line.next()?;
-        current_group.clear();
-        groups.clear();
+    if match_patterns_with_backtracking(&mut input_line, patterns, &mut groups, &mut current_group)
+        && (!end || input_line.peek().is_none())
+    {
+        Some(current_group)
+    } else {
+        None
     }
 }
 
