@@ -264,6 +264,21 @@ fn quantifiers_zero_or_more() {
 }
 
 #[test]
+fn quantifiers_exact_count() {
+    assert_eq!(match_regex("caaat", r"ca{3}t"), Some("caaat".to_string()));
+    assert!(match_regex("caat", r"ca{3}t").is_none());
+    assert!(match_regex("caaaat", r"ca{3}t").is_none());
+    assert_eq!(match_regex("d42g", r"d\d{2}g"), Some("d42g".to_string()));
+    assert!(match_regex("d1g", r"d\d{2}g").is_none());
+    assert!(match_regex("d123g", r"d\d{2}g").is_none());
+    assert_eq!(
+        match_regex("czyxzw", r"c[xyz]{4}w"),
+        Some("czyxzw".to_string())
+    );
+    assert!(match_regex("cxyzw", r"c[xyz]{4}w").is_none());
+}
+
+#[test]
 fn alternation_basic() {
     assert_eq!(
         match_regex("a cat", "a (cat|dog)"),

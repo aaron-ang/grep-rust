@@ -113,6 +113,7 @@ pub enum Count {
     OneOrMore,
     ZeroOrOne,
     ZeroOrMore,
+    Exact(usize),
 }
 
 impl Count {
@@ -143,6 +144,15 @@ impl Count {
             }
             Self::ZeroOrMore => {
                 while let Some(c) = input_line.next_if(&pred) {
+                    current_group.push(c);
+                }
+                true
+            }
+            Self::Exact(n) => {
+                for _ in 0..n {
+                    let Some(c) = input_line.next_if(&pred) else {
+                        return false;
+                    };
                     current_group.push(c);
                 }
                 true
@@ -207,6 +217,14 @@ impl Alternation {
                 while self.match_once(input_line, captured_groups, current_group) {}
                 true
             }
+            Count::Exact(n) => {
+                for _ in 0..n {
+                    if !self.match_once(input_line, captured_groups, current_group) {
+                        return false;
+                    }
+                }
+                true
+            }
         }
     }
 }
@@ -240,6 +258,14 @@ impl Group {
             }
             Count::ZeroOrMore => {
                 while self.match_once(input_line, captured_groups, current_group) {}
+                true
+            }
+            Count::Exact(n) => {
+                for _ in 0..n {
+                    if !self.match_once(input_line, captured_groups, current_group) {
+                        return false;
+                    }
+                }
                 true
             }
         }
