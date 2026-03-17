@@ -38,3 +38,29 @@ Note: This section is for stages 2 and beyond.
    the first time you run it. Subsequent runs will be fast.
 1. Commit your changes and run `git push origin master` to submit your solution
    to CodeCrafters. Test output will be streamed to your terminal.
+
+# Benchmarking
+
+Install `hyperfine` locally:
+
+```sh
+brew install hyperfine
+```
+
+Generate a synthetic corpus:
+
+```sh
+./scripts/gen-bench-data.sh
+```
+
+Compare this implementation with system `grep`:
+
+```sh
+./scripts/bench.sh
+```
+
+You can also override the regex pattern and input file:
+
+```sh
+./scripts/bench.sh 'user_\d+' bench/data.txt
+```
