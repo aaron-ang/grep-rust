@@ -53,14 +53,16 @@ Generate a synthetic corpus:
 ./scripts/gen-bench-data.sh
 ```
 
-Compare this implementation with system `grep`:
+Run the benchmark and generate an SVG plot:
 
 ```sh
-./scripts/bench.sh
+python3 scripts/bench.py
 ```
+
+This writes `bench/benchmark.svg`.
 
 You can also override the regex pattern and input file:
 
 ```sh
-./scripts/bench.sh 'user_\d+' bench/data.txt
+python3 scripts/bench.py 'user_\d+' bench/data.txt
 ```
