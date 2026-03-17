@@ -41,10 +41,20 @@ impl Parser {
         }
     }
 
-    fn parse_count(pattern: &mut Peekable<Chars>) -> Count {
-        match pattern.next_if(|c| matches!(c, '+' | '?')) {
-            Some('+') => Count::OneOrMore,
-            Some('?') => Count::ZeroOrOne,
+    fn parse_count(chars: &mut Peekable<Chars>) -> Count {
+        match chars.peek() {
+            Some('+') => {
+                chars.next();
+                Count::OneOrMore
+            }
+            Some('?') => {
+                chars.next();
+                Count::ZeroOrOne
+            }
+            Some('*') => {
+                chars.next();
+                Count::ZeroOrMore
+            }
             _ => Count::One,
         }
     }
@@ -68,23 +78,24 @@ impl Parser {
 
     fn parse_group(&mut self, chars: &mut Peekable<Chars>) -> Pattern {
         let (idx, mut patterns) = self.parse_alternation(chars);
+        let count = Parser::parse_count(chars);
         if patterns.len() == 1 {
             Pattern::CapturedGroup(Group {
                 idx,
                 patterns: patterns.pop().unwrap(),
-                count: Parser::parse_count(chars),
+                count,
             })
         } else {
             Pattern::Alternation(Alternation {
                 idx,
                 alternatives: patterns,
-                count: Parser::parse_count(chars),
+                count,
             })
         }
     }
 
     fn parse_alternation(&mut self, chars: &mut Peekable<Chars>) -> (usize, Vec<Vec<Pattern>>) {
-        let mut alternation = vec![];
+        let mut alternation = Vec::new();
         let mut group_chars = String::new();
         let mut num_open_parens = 0;
         let idx = self.group_idx;
@@ -120,7 +131,7 @@ impl Parser {
     }
 
     fn read_group_items(&mut self, pattern: &mut Peekable<Chars>) -> Vec<Pattern> {
-        let mut items = vec![];
+        let mut items = Vec::new();
         while pattern.peek().is_some() {
             items.push(self.parse(pattern))
         }

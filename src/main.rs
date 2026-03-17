@@ -6,24 +6,21 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use colored::Colorize;
 
-use grep_starter_rust::match_regex;
+use grep_rust::match_regex;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Search for pattern in files
-    #[arg(short = 'E')]
+    #[arg(short = 'E', allow_hyphen_values = true, value_name = "pattern")]
     pattern: String,
 
-    /// Recursively search through directories
-    #[arg(short, action = ArgAction::SetTrue)]
+    #[arg(short = 'r')]
     recursive: bool,
 
-    /// Files to search
-    #[arg(num_args = 0..)]
+    #[arg(value_name = "file")]
     files: Vec<PathBuf>,
 }
 
