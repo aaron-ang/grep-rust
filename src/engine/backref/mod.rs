@@ -1,7 +1,9 @@
-use crate::pattern::{
-    compile_backreference_regex, find_all_backreference_regex_spans_compiled,
-    CompiledBackreferenceRegex,
-};
+mod ast;
+mod parser;
+mod runtime;
+
+use ast::{compile_backreference_regex, find_all_backreference_regex_spans_compiled};
+use runtime::CompiledBackreferenceRegex;
 
 use super::RegexMatch;
 

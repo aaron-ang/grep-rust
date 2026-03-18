@@ -1,17 +1,17 @@
 use std::{iter::Peekable, str::Chars};
 
-use crate::pattern::{CharGroup, Count, Pattern};
+use super::ast::{CharGroup, Count, Pattern};
 
-pub struct Parser {
+pub(super) struct Parser {
     group_idx: usize,
 }
 
 impl Parser {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self { group_idx: 0 }
     }
 
-    pub fn parse(&mut self, chars: &mut Peekable<Chars>) -> Pattern {
+    pub(super) fn parse(&mut self, chars: &mut Peekable<Chars>) -> Pattern {
         let c = chars.next().unwrap();
         match c {
             '\\' => Parser::parse_escape(chars),
@@ -21,7 +21,7 @@ impl Parser {
             }
             '.' => Pattern::Wildcard(Parser::parse_count(chars)),
             '(' => self.parse_group(chars),
-            l => Pattern::Literal(l, Parser::parse_count(chars)),
+            literal => Pattern::Literal(literal, Parser::parse_count(chars)),
         }
     }
 
@@ -29,14 +29,10 @@ impl Parser {
         let c = chars.next().expect("Expected character after '\\'");
         let count = Parser::parse_count(chars);
         match c {
-            // Classes
             'd' => Pattern::Digit(count),
             'w' => Pattern::Alphanumeric(count),
-            // Escaped backslash
             '\\' => Pattern::Literal('\\', count),
-            // Backreferences
             c if c.is_ascii_digit() => Pattern::Backreference(c.to_digit(10).unwrap() as usize),
-            // Unsupported characters
             unknown => panic!("Unknown special character: {unknown}"),
         }
     }

@@ -1,344 +1,9 @@
-use crate::{engine::RegexMatch, parser::Parser};
+use crate::engine::RegexMatch;
+
+use super::ast::{CaptureSpan, CharGroup, Count, Pattern};
 
 #[derive(Debug)]
-pub enum Pattern {
-    Literal(char, Count),
-    Digit(Count),
-    Alphanumeric(Count),
-    Wildcard(Count),
-    CharGroup(CharGroup, Count),
-    Alternation {
-        idx: usize,
-        alternatives: Vec<Vec<Pattern>>,
-        count: Count,
-    },
-    CapturedGroup {
-        idx: usize,
-        patterns: Vec<Pattern>,
-        count: Count,
-    },
-    Backreference(usize),
-}
-
-impl Pattern {
-    fn parse(
-        regex: &str,
-    ) -> (
-        Vec<Pattern>,
-        bool, /* start_anchor */
-        bool, /* end_anchor */
-    ) {
-        let start = regex.starts_with('^');
-        let end = regex.ends_with('$');
-        let mut chars = regex.chars().peekable();
-
-        if start {
-            chars.next();
-        }
-        if end {
-            chars.next_back();
-        }
-
-        let mut parser = Parser::new();
-        let mut patterns = Vec::new();
-        while chars.peek().is_some() {
-            patterns.push(parser.parse(&mut chars));
-        }
-
-        (patterns, start, end)
-    }
-
-    fn count(&self) -> Count {
-        match self {
-            Pattern::Literal(_, count)
-            | Pattern::Digit(count)
-            | Pattern::Alphanumeric(count)
-            | Pattern::Wildcard(count)
-            | Pattern::CharGroup(_, count)
-            | Pattern::Alternation { count, .. }
-            | Pattern::CapturedGroup { count, .. } => *count,
-            Pattern::Backreference(_) => Count::One,
-        }
-    }
-
-    fn normalize_sequence(patterns: Vec<Pattern>) -> Vec<Pattern> {
-        let mut normalized: Vec<Pattern> = Vec::with_capacity(patterns.len());
-
-        for pattern in patterns {
-            let pattern = match pattern {
-                Pattern::Alternation {
-                    idx,
-                    alternatives,
-                    count,
-                } => Pattern::Alternation {
-                    idx,
-                    alternatives: alternatives
-                        .into_iter()
-                        .map(Self::normalize_sequence)
-                        .collect(),
-                    count,
-                },
-                Pattern::CapturedGroup {
-                    idx,
-                    patterns,
-                    count,
-                } => Pattern::CapturedGroup {
-                    idx,
-                    patterns: Self::normalize_sequence(patterns),
-                    count,
-                },
-                other => other,
-            };
-
-            if let Some(previous) = normalized.last_mut() {
-                if previous.merge_adjacent_simple(&pattern) {
-                    continue;
-                }
-            }
-
-            normalized.push(pattern);
-        }
-
-        normalized
-    }
-
-    fn referenced_groups(patterns: &[Pattern]) -> Vec<usize> {
-        let mut referenced = Vec::new();
-        Self::collect_referenced_groups(patterns, &mut referenced);
-        referenced.sort_unstable();
-        referenced.dedup();
-        referenced
-    }
-
-    fn collect_referenced_groups(patterns: &[Pattern], referenced: &mut Vec<usize>) {
-        for pattern in patterns {
-            match pattern {
-                Pattern::Alternation { alternatives, .. } => {
-                    for alternative in alternatives {
-                        Self::collect_referenced_groups(alternative, referenced);
-                    }
-                }
-                Pattern::CapturedGroup { patterns, .. } => {
-                    Self::collect_referenced_groups(patterns, referenced);
-                }
-                Pattern::Backreference(group) => referenced.push(group - 1),
-                Pattern::Literal(_, _)
-                | Pattern::Digit(_)
-                | Pattern::Alphanumeric(_)
-                | Pattern::Wildcard(_)
-                | Pattern::CharGroup(_, _) => {}
-            }
-        }
-    }
-
-    fn first_required_start_predicate(patterns: &[Pattern]) -> Option<StartPredicate> {
-        for pattern in patterns {
-            if let Some(predicate) = pattern.required_start_predicate() {
-                if pattern.count().repetition_bounds().0 > 0 {
-                    return Some(predicate);
-                }
-            }
-
-            if pattern.count().repetition_bounds().0 > 0 {
-                return None;
-            }
-        }
-
-        None
-    }
-
-    fn leading_literal_sequence(patterns: &[Pattern]) -> Option<(String, usize)> {
-        let mut literal = String::new();
-        let mut consumed = 0;
-
-        for pattern in patterns {
-            let Some((ch, repetitions)) = pattern.literal_run_atom() else {
-                break;
-            };
-            literal.extend(std::iter::repeat_n(ch, repetitions));
-            consumed += 1;
-        }
-
-        (!literal.is_empty()).then_some((literal, consumed))
-    }
-
-    fn required_start_predicate(&self) -> Option<StartPredicate> {
-        match self {
-            Pattern::Literal(ch, _) => Some(StartPredicate::Literal(*ch)),
-            Pattern::Digit(_) => Some(StartPredicate::Digit),
-            Pattern::Alphanumeric(_) => Some(StartPredicate::Word),
-            Pattern::Wildcard(_) => Some(StartPredicate::Wildcard),
-            Pattern::CharGroup(group, _) => Some(StartPredicate::CharGroup(group.clone())),
-            Pattern::CapturedGroup { patterns, .. } => {
-                Self::first_required_start_predicate(patterns)
-            }
-            Pattern::Alternation { alternatives, .. } => {
-                let mut predicates = alternatives
-                    .iter()
-                    .map(|alternative| Self::first_required_start_predicate(alternative))
-                    .collect::<Option<Vec<_>>>()?;
-                let first = predicates.pop()?;
-                predicates
-                    .into_iter()
-                    .all(|candidate| candidate == first)
-                    .then_some(first)
-            }
-            Pattern::Backreference(_) => None,
-        }
-    }
-
-    fn fixed_width(&self) -> Option<usize> {
-        let repetitions = self.count().fixed_repetitions()?;
-        let single = match self {
-            Pattern::Literal(_, _)
-            | Pattern::Digit(_)
-            | Pattern::Alphanumeric(_)
-            | Pattern::Wildcard(_)
-            | Pattern::CharGroup(_, _) => Some(1),
-            Pattern::CapturedGroup { patterns, .. } => patterns
-                .iter()
-                .try_fold(0, |total, pattern| Some(total + pattern.fixed_width()?)),
-            Pattern::Alternation { alternatives, .. } => {
-                let mut widths = alternatives.iter().map(|alternative| {
-                    alternative
-                        .iter()
-                        .try_fold(0, |total, pattern| Some(total + pattern.fixed_width()?))
-                });
-                let first = widths.next()??;
-                widths.all(|width| width == Some(first)).then_some(first)
-            }
-            Pattern::Backreference(_) => None,
-        }?;
-
-        Some(single * repetitions)
-    }
-
-    fn literal_run_atom(&self) -> Option<(char, usize)> {
-        match self {
-            Pattern::Literal(ch, count) => count
-                .fixed_repetitions()
-                .map(|repetitions| (*ch, repetitions)),
-            _ => None,
-        }
-    }
-
-    fn merge_adjacent_simple(&mut self, next: &Self) -> bool {
-        match (self, next) {
-            (Pattern::Literal(left, left_count), Pattern::Literal(right, right_count))
-                if left == right =>
-            {
-                *left_count = left_count.combine(right_count);
-                true
-            }
-            (Pattern::Digit(left_count), Pattern::Digit(right_count))
-            | (Pattern::Alphanumeric(left_count), Pattern::Alphanumeric(right_count))
-            | (Pattern::Wildcard(left_count), Pattern::Wildcard(right_count)) => {
-                *left_count = left_count.combine(right_count);
-                true
-            }
-            (
-                Pattern::CharGroup(left_group, left_count),
-                Pattern::CharGroup(right_group, right_count),
-            ) if left_group == right_group => {
-                *left_count = left_count.combine(right_count);
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Count {
-    One,
-    OneOrMore,
-    ZeroOrOne,
-    ZeroOrMore,
-    Exact(usize),
-    AtLeast(usize),
-    Range(usize, usize),
-}
-
-impl Count {
-    fn is_exactly_one(self) -> bool {
-        matches!(self, Count::One | Count::Exact(1))
-    }
-
-    fn fixed_repetitions(self) -> Option<usize> {
-        match self {
-            Count::One => Some(1),
-            Count::Exact(n) => Some(n),
-            _ => None,
-        }
-    }
-
-    fn repetition_bounds(self) -> (usize, Option<usize>) {
-        match self {
-            Count::One => (1, Some(1)),
-            Count::OneOrMore => (1, None),
-            Count::ZeroOrOne => (0, Some(1)),
-            Count::ZeroOrMore => (0, None),
-            Count::Exact(n) => (n, Some(n)),
-            Count::AtLeast(min) => (min, None),
-            Count::Range(min, max) => (min, Some(max)),
-        }
-    }
-
-    fn combine(&self, other: &Self) -> Self {
-        let (left_min, left_max) = self.repetition_bounds();
-        let (right_min, right_max) = other.repetition_bounds();
-        let min = left_min + right_min;
-        let max = match (left_max, right_max) {
-            (Some(left), Some(right)) => Some(left + right),
-            _ => None,
-        };
-
-        match (min, max) {
-            (1, Some(1)) => Count::One,
-            (0, Some(1)) => Count::ZeroOrOne,
-            (1, None) => Count::OneOrMore,
-            (0, None) => Count::ZeroOrMore,
-            (exact, Some(upper)) if exact == upper => Count::Exact(exact),
-            (lower, None) => Count::AtLeast(lower),
-            (lower, Some(upper)) => Count::Range(lower, upper),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CharGroup {
-    negated: bool,
-    ascii_members: [bool; 128],
-}
-
-impl CharGroup {
-    pub fn new(negated: bool, members: &str) -> Self {
-        let mut ascii_members = [false; 128];
-        for member in members.chars() {
-            if member.is_ascii() {
-                ascii_members[member as usize] = true;
-            }
-        }
-
-        Self {
-            negated,
-            ascii_members,
-        }
-    }
-
-    fn matches(&self, c: char) -> bool {
-        c.is_ascii_alphanumeric() && (self.ascii_members[c as usize] ^ self.negated)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct CaptureSpan {
-    start: usize,
-    end: usize,
-}
-
-#[derive(Debug)]
-pub(crate) struct CompiledBackreferenceRegex {
+pub(super) struct CompiledBackreferenceRegex {
     plan: BackreferencePlan,
 }
 
@@ -349,7 +14,7 @@ struct BackreferencePlan {
     start_anchor: bool,
     end_anchor: bool,
     search_hints: SearchHints,
-    fast_path: Option<FastPath>,
+    fast_path: Option<SingleCaptureLiteralBackref>,
 }
 
 #[derive(Debug)]
@@ -360,11 +25,9 @@ struct SearchHints {
 }
 
 #[derive(Debug)]
-enum FastPath {
-    SingleCaptureLiteralBackref {
-        matcher: RepeatedAtomMatcher,
-        separator: String,
-    },
+struct SingleCaptureLiteralBackref {
+    matcher: RepeatedAtomMatcher,
+    separator: String,
 }
 
 #[derive(Debug)]
@@ -424,32 +87,39 @@ enum Instruction {
 struct VmState {
     pc: usize,
     pos: usize,
-    captures: Captures,
+    captures: Vec<Option<CaptureSpan>>,
     epsilon_trace: Vec<(usize, usize)>,
 }
 
-type Captures = Vec<Option<CaptureSpan>>;
-
-pub(crate) fn compile_backreference_regex(regex: &str) -> CompiledBackreferenceRegex {
-    CompiledBackreferenceRegex::new(regex)
-}
-
-pub(crate) fn find_all_backreference_regex_spans_compiled(
-    input_line: &str,
-    regex: &CompiledBackreferenceRegex,
-) -> Vec<RegexMatch> {
-    regex.plan.find_all(input_line)
+#[derive(Default)]
+struct AnchorCollector {
+    best: Option<(String, Option<usize>)>,
 }
 
 impl CompiledBackreferenceRegex {
-    fn new(regex: &str) -> Self {
+    pub(super) fn new(regex: &str) -> Self {
         let (patterns, start_anchor, end_anchor) = Pattern::parse(regex);
         Self {
             plan: BackreferencePlan::compile(
-                &Pattern::normalize_sequence(patterns),
+                &normalize_patterns(patterns),
                 start_anchor,
                 end_anchor,
             ),
+        }
+    }
+
+    pub(super) fn find_all(&self, input: &str) -> Vec<RegexMatch> {
+        self.plan.find_all(input)
+    }
+}
+
+impl SimpleAtom {
+    fn matches_at(&self, input: &str, pos: usize) -> bool {
+        match self {
+            SimpleAtom::Literal(ch) => matches_literal(input, pos, *ch),
+            SimpleAtom::Digit => matches_digit(input, pos),
+            SimpleAtom::Word => matches_word(input, pos),
+            SimpleAtom::CharGroup(group) => matches_group(input, pos, group),
         }
     }
 }
@@ -465,17 +135,6 @@ impl StartPredicate {
                 match_char(input, pos, |current| !r"\[](|)".contains(current)).is_some()
             }
             StartPredicate::CharGroup(group) => matches_group(input, pos, group),
-        }
-    }
-}
-
-impl SimpleAtom {
-    fn matches_at(&self, input: &str, pos: usize) -> bool {
-        match self {
-            SimpleAtom::Literal(ch) => matches_literal(input, pos, *ch),
-            SimpleAtom::Digit => matches_digit(input, pos),
-            SimpleAtom::Word => matches_word(input, pos),
-            SimpleAtom::CharGroup(group) => matches_group(input, pos, group),
         }
     }
 }
@@ -574,56 +233,15 @@ impl RepeatedAtomMatcher {
 
 impl BackreferencePlan {
     fn compile(patterns: &[Pattern], start_anchor: bool, end_anchor: bool) -> Self {
-        let referenced_groups = Pattern::referenced_groups(patterns);
-        let group_slots = Self::build_group_slots(&referenced_groups);
+        let referenced_groups = referenced_groups(patterns);
+        let group_slots = build_group_slots(&referenced_groups);
         Self {
             instructions: BackreferenceCompiler::compile(patterns, &group_slots),
             referenced_capture_count: referenced_groups.len(),
             start_anchor,
             end_anchor,
             search_hints: SearchHints::analyze(patterns, start_anchor),
-            fast_path: Self::detect_fast_path(patterns),
-        }
-    }
-
-    fn build_group_slots(referenced_groups: &[usize]) -> Vec<Option<usize>> {
-        let Some(max_group) = referenced_groups.iter().copied().max() else {
-            return Vec::new();
-        };
-
-        let mut slots = vec![None; max_group + 1];
-        for (slot, group_idx) in referenced_groups.iter().copied().enumerate() {
-            slots[group_idx] = Some(slot);
-        }
-        slots
-    }
-
-    fn detect_fast_path(patterns: &[Pattern]) -> Option<FastPath> {
-        let (first, remaining) = patterns.split_first()?;
-        let Pattern::CapturedGroup {
-            idx,
-            patterns: inner,
-            count,
-        } = first
-        else {
-            return None;
-        };
-
-        if *idx != 0 || !count.is_exactly_one() {
-            return None;
-        }
-
-        let [capture_pattern] = inner.as_slice() else {
-            return None;
-        };
-        let matcher = RepeatedAtomMatcher::from_pattern(capture_pattern)?;
-        let (separator, literal_count) = Pattern::leading_literal_sequence(remaining)?;
-        let tail = &remaining[literal_count..];
-
-        if tail.len() == 1 && matches!(tail[0], Pattern::Backreference(1)) {
-            Some(FastPath::SingleCaptureLiteralBackref { matcher, separator })
-        } else {
-            None
+            fast_path: detect_fast_path(patterns),
         }
     }
 
@@ -675,11 +293,13 @@ impl BackreferencePlan {
     }
 
     fn find_fast_path_match(&self, input: &str, scan_start: usize) -> Option<RegexMatch> {
-        match self.fast_path.as_ref()? {
-            FastPath::SingleCaptureLiteralBackref { matcher, separator } => {
-                self.find_single_capture_literal_backref(input, scan_start, matcher, separator)
-            }
-        }
+        let fast_path = self.fast_path.as_ref()?;
+        self.find_single_capture_literal_backref(
+            input,
+            scan_start,
+            &fast_path.matcher,
+            &fast_path.separator,
+        )
     }
 
     fn find_single_capture_literal_backref(
@@ -691,7 +311,7 @@ impl BackreferencePlan {
     ) -> Option<RegexMatch> {
         let mut search_from = scan_start;
 
-        while let Some(separator_start) = AnchorLiteral::find_in(input, search_from, separator) {
+        while let Some(separator_start) = find_literal_from(input, search_from, separator) {
             let separator_end = separator_start + separator.len();
 
             if let Some(found) = self.match_single_capture_literal_backref_at(
@@ -763,8 +383,7 @@ impl BackreferencePlan {
     }
 
     fn execute(&self, input: &str, start: usize) -> Option<usize> {
-        let initial = VmState::new(self.referenced_capture_count, start);
-        let mut stack = vec![initial];
+        let mut stack = vec![VmState::new(self.referenced_capture_count, start)];
 
         while let Some(mut state) = stack.pop() {
             loop {
@@ -825,9 +444,7 @@ impl BackreferencePlan {
                         stack.push(state.fork(*fallback));
                         state.pc = *preferred;
                     }
-                    Instruction::Jump(target) => {
-                        state.pc = *target;
-                    }
+                    Instruction::Jump(target) => state.pc = *target,
                     Instruction::SaveCaptureStart(slot) => {
                         state.captures[*slot] = Some(CaptureSpan {
                             start: state.pos,
@@ -871,77 +488,20 @@ impl BackreferencePlan {
 
 impl SearchHints {
     fn analyze(patterns: &[Pattern], start_anchor: bool) -> Self {
-        let anchor = Self::extract_anchor_literal(patterns);
+        let anchor = extract_anchor_literal(patterns);
         let start_predicate = if start_anchor {
             StartPredicate::Any
         } else {
-            Pattern::first_required_start_predicate(patterns).unwrap_or(StartPredicate::Any)
+            first_required_start_predicate(patterns).unwrap_or(StartPredicate::Any)
         };
         let candidate_strategy =
-            Self::candidate_strategy_for(start_anchor, anchor.as_ref(), patterns, &start_predicate);
+            candidate_strategy_for(start_anchor, anchor.as_ref(), patterns, &start_predicate);
 
         Self {
             anchor,
             start_predicate,
             candidate_strategy,
         }
-    }
-
-    fn extract_anchor_literal(patterns: &[Pattern]) -> Option<AnchorLiteral> {
-        let mut collector = AnchorCollector::default();
-        collector.visit_sequence(patterns, Some(0));
-        collector
-            .best
-            .map(|(text, prefix_width)| AnchorLiteral { text, prefix_width })
-    }
-
-    fn candidate_strategy_for(
-        start_anchor: bool,
-        anchor: Option<&AnchorLiteral>,
-        patterns: &[Pattern],
-        start_predicate: &StartPredicate,
-    ) -> CandidateStrategy {
-        if start_anchor {
-            return CandidateStrategy::StartPredicateScan;
-        }
-
-        let Some(anchor) = anchor else {
-            return CandidateStrategy::StartPredicateScan;
-        };
-
-        if anchor.prefix_width.is_some() {
-            CandidateStrategy::FixedPrefixAnchor
-        } else if Self::should_use_variable_prefix_anchor(patterns, anchor, start_predicate) {
-            CandidateStrategy::VariablePrefixLiteralAnchor
-        } else {
-            CandidateStrategy::StartPredicateScan
-        }
-    }
-
-    fn should_use_variable_prefix_anchor(
-        patterns: &[Pattern],
-        anchor: &AnchorLiteral,
-        start_predicate: &StartPredicate,
-    ) -> bool {
-        let Some((first, remaining)) = patterns.split_first() else {
-            return false;
-        };
-
-        Self::matches_simple_variable_prefix(first, start_predicate)
-            && Pattern::leading_literal_sequence(remaining)
-                .is_some_and(|(literal, _)| literal == anchor.text)
-    }
-
-    fn matches_simple_variable_prefix(pattern: &Pattern, start_predicate: &StartPredicate) -> bool {
-        let count = pattern.count();
-        let (min, max) = count.repetition_bounds();
-
-        min > 0
-            && max.is_none()
-            && pattern
-                .required_start_predicate()
-                .as_ref()
-                .is_some_and(|candidate| candidate == start_predicate)
     }
 
     fn visit_candidates<T>(
@@ -961,7 +521,7 @@ impl SearchHints {
             CandidateStrategy::FixedPrefixAnchor => {
                 let anchor = self.anchor.as_ref()?;
                 let prefix_width = anchor.prefix_width?;
-                anchor.visit_hits(input, scan_start, |anchor_start| {
+                visit_anchor_hits(input, scan_start, &anchor.text, |anchor_start| {
                     let candidate = anchor_start.checked_sub(prefix_width)?;
                     if candidate < scan_start || !input.is_char_boundary(candidate) {
                         return None;
@@ -974,11 +534,12 @@ impl SearchHints {
             }
             CandidateStrategy::VariablePrefixLiteralAnchor => {
                 let anchor = self.anchor.as_ref()?;
-                anchor.visit_hits(input, scan_start, |anchor_start| {
-                    self.visit_bounded_backward_candidates(
+                visit_anchor_hits(input, scan_start, &anchor.text, |anchor_start| {
+                    visit_bounded_backward_candidates(
                         input,
                         scan_start,
                         anchor_start,
+                        &self.start_predicate,
                         |candidate| {
                             if last_candidate.replace(candidate) == Some(candidate) {
                                 return None;
@@ -989,160 +550,10 @@ impl SearchHints {
                 })
             }
             CandidateStrategy::StartPredicateScan => {
-                self.visit_scan_candidates(input, scan_start, input.len(), visit)
+                visit_scan_candidates(input, scan_start, input.len(), &self.start_predicate, visit)
             }
         }
     }
-
-    fn visit_scan_candidates<T>(
-        &self,
-        input: &str,
-        scan_start: usize,
-        upper_bound: usize,
-        mut visit: impl FnMut(usize) -> Option<T>,
-    ) -> Option<T> {
-        let mut current = scan_start;
-        while current <= upper_bound {
-            if matches!(self.start_predicate, StartPredicate::Any)
-                || self.start_predicate.matches_at(input, current)
-            {
-                if let Some(result) = visit(current) {
-                    return Some(result);
-                }
-            }
-            let Some(next) = next_char_boundary(input, current) else {
-                break;
-            };
-            current = next;
-        }
-
-        None
-    }
-
-    fn visit_bounded_backward_candidates<T>(
-        &self,
-        input: &str,
-        scan_start: usize,
-        upper_bound: usize,
-        mut visit: impl FnMut(usize) -> Option<T>,
-    ) -> Option<T> {
-        if upper_bound < scan_start || !self.start_predicate.matches_at(input, upper_bound) {
-            return None;
-        }
-
-        let mut earliest = upper_bound;
-        while let Some(previous) = previous_char_boundary(input, earliest) {
-            if previous < scan_start || !self.start_predicate.matches_at(input, previous) {
-                break;
-            }
-            earliest = previous;
-        }
-
-        let mut current = earliest;
-        loop {
-            if let Some(result) = visit(current) {
-                return Some(result);
-            }
-            if current == upper_bound {
-                break;
-            }
-            current =
-                next_char_boundary(input, current).expect("candidate boundary should advance");
-        }
-
-        None
-    }
-}
-
-impl AnchorLiteral {
-    fn find_in(input: &str, search_from: usize, literal: &str) -> Option<usize> {
-        input
-            .get(search_from..)?
-            .find(literal)
-            .map(|offset| search_from + offset)
-    }
-
-    fn visit_hits<T>(
-        &self,
-        input: &str,
-        scan_start: usize,
-        mut visit: impl FnMut(usize) -> Option<T>,
-    ) -> Option<T> {
-        let mut search_from = scan_start;
-
-        while let Some(anchor_start) = Self::find_in(input, search_from, &self.text) {
-            if let Some(result) = visit(anchor_start) {
-                return Some(result);
-            }
-
-            let Some(next) = next_char_boundary(input, anchor_start) else {
-                break;
-            };
-            search_from = next;
-        }
-
-        None
-    }
-}
-
-#[derive(Default)]
-struct AnchorCollector {
-    best: Option<(String, Option<usize>)>,
-}
-
-impl AnchorCollector {
-    fn visit_sequence(
-        &mut self,
-        patterns: &[Pattern],
-        prefix_width: Option<usize>,
-    ) -> Option<usize> {
-        let mut current_prefix = prefix_width;
-        let mut current_run = String::new();
-        let mut run_prefix = current_prefix;
-
-        for pattern in patterns {
-            if let Some((ch, repetitions)) = pattern.literal_run_atom() {
-                if current_run.is_empty() {
-                    run_prefix = current_prefix;
-                }
-                current_run.extend(std::iter::repeat_n(ch, repetitions));
-                self.consider_run(&current_run, run_prefix);
-                current_prefix = combine_widths(current_prefix, Some(repetitions));
-                continue;
-            }
-
-            current_run.clear();
-
-            if let Pattern::CapturedGroup {
-                patterns, count, ..
-            } = pattern
-            {
-                if count.is_exactly_one() {
-                    self.visit_sequence(patterns, current_prefix);
-                }
-            }
-
-            current_prefix = combine_widths(current_prefix, pattern.fixed_width());
-        }
-
-        current_prefix
-    }
-
-    fn consider_run(&mut self, run: &str, prefix_width: Option<usize>) {
-        let should_replace = self
-            .best
-            .as_ref()
-            .is_none_or(|(best, _)| run.len() > best.len());
-
-        if should_replace {
-            self.best = Some((run.to_string(), prefix_width));
-        }
-    }
-}
-
-struct BackreferenceCompiler<'a> {
-    instructions: Vec<Instruction>,
-    group_slots: &'a [Option<usize>],
 }
 
 impl BackreferenceCompiler<'_> {
@@ -1262,16 +673,14 @@ impl BackreferenceCompiler<'_> {
         let split_idx = self.emit_split_placeholder();
         let body_start = self.instructions.len();
         emit_body(self);
-        let after = self.instructions.len();
-        self.patch_split(split_idx, body_start, after);
+        self.patch_split(split_idx, body_start, self.instructions.len());
     }
 
     fn compile_one_or_more(&mut self, emit_body: &mut impl FnMut(&mut BackreferenceCompiler<'_>)) {
         let body_start = self.instructions.len();
         emit_body(self);
         let split_idx = self.emit_split_placeholder();
-        let after = self.instructions.len();
-        self.patch_split(split_idx, body_start, after);
+        self.patch_split(split_idx, body_start, self.instructions.len());
     }
 
     fn compile_zero_or_more(&mut self, emit_body: &mut impl FnMut(&mut BackreferenceCompiler<'_>)) {
@@ -1279,8 +688,7 @@ impl BackreferenceCompiler<'_> {
         let body_start = self.instructions.len();
         emit_body(self);
         self.emit(Instruction::Jump(split_idx));
-        let after = self.instructions.len();
-        self.patch_split(split_idx, body_start, after);
+        self.patch_split(split_idx, body_start, self.instructions.len());
     }
 
     fn compile_alternatives(&mut self, alternatives: &[Vec<Pattern>]) {
@@ -1296,9 +704,8 @@ impl BackreferenceCompiler<'_> {
             let jump_idx = self.emit_jump_placeholder();
             let fallback_start = self.instructions.len();
             self.compile_alternatives(remaining);
-            let after = self.instructions.len();
             self.patch_split(split_idx, first_start, fallback_start);
-            self.patch_jump(jump_idx, after);
+            self.patch_jump(jump_idx, self.instructions.len());
         }
     }
 
@@ -1330,6 +737,56 @@ impl BackreferenceCompiler<'_> {
 
     fn patch_jump(&mut self, idx: usize, target: usize) {
         self.instructions[idx] = Instruction::Jump(target);
+    }
+}
+
+impl AnchorCollector {
+    fn visit_sequence(
+        &mut self,
+        patterns: &[Pattern],
+        prefix_width: Option<usize>,
+    ) -> Option<usize> {
+        let mut current_prefix = prefix_width;
+        let mut current_run = String::new();
+        let mut run_prefix = current_prefix;
+
+        for pattern in patterns {
+            if let Some((ch, repetitions)) = literal_run_atom(pattern) {
+                if current_run.is_empty() {
+                    run_prefix = current_prefix;
+                }
+                current_run.extend(std::iter::repeat_n(ch, repetitions));
+                self.consider_run(&current_run, run_prefix);
+                current_prefix = combine_widths(current_prefix, Some(repetitions));
+                continue;
+            }
+
+            current_run.clear();
+
+            if let Pattern::CapturedGroup {
+                patterns, count, ..
+            } = pattern
+            {
+                if count.is_exactly_one() {
+                    self.visit_sequence(patterns, current_prefix);
+                }
+            }
+
+            current_prefix = combine_widths(current_prefix, fixed_width(pattern));
+        }
+
+        current_prefix
+    }
+
+    fn consider_run(&mut self, run: &str, prefix_width: Option<usize>) {
+        let should_replace = self
+            .best
+            .as_ref()
+            .is_none_or(|(best, _)| run.len() > best.len());
+
+        if should_replace {
+            self.best = Some((run.to_string(), prefix_width));
+        }
     }
 }
 
@@ -1380,8 +837,377 @@ impl VmState {
     }
 }
 
-fn combine_widths(left: Option<usize>, right: Option<usize>) -> Option<usize> {
-    Some(left? + right?)
+struct BackreferenceCompiler<'a> {
+    instructions: Vec<Instruction>,
+    group_slots: &'a [Option<usize>],
+}
+
+fn normalize_patterns(patterns: Vec<Pattern>) -> Vec<Pattern> {
+    let mut normalized: Vec<Pattern> = Vec::with_capacity(patterns.len());
+
+    for pattern in patterns {
+        let pattern = match pattern {
+            Pattern::Alternation {
+                idx,
+                alternatives,
+                count,
+            } => Pattern::Alternation {
+                idx,
+                alternatives: alternatives.into_iter().map(normalize_patterns).collect(),
+                count,
+            },
+            Pattern::CapturedGroup {
+                idx,
+                patterns,
+                count,
+            } => Pattern::CapturedGroup {
+                idx,
+                patterns: normalize_patterns(patterns),
+                count,
+            },
+            other => other,
+        };
+
+        if let Some(previous) = normalized.last_mut() {
+            if merge_adjacent_simple(previous, &pattern) {
+                continue;
+            }
+        }
+
+        normalized.push(pattern);
+    }
+
+    normalized
+}
+
+fn merge_adjacent_simple(previous: &mut Pattern, next: &Pattern) -> bool {
+    match (previous, next) {
+        (Pattern::Literal(left, left_count), Pattern::Literal(right, right_count))
+            if left == right =>
+        {
+            *left_count = left_count.combine(right_count);
+            true
+        }
+        (Pattern::Digit(left_count), Pattern::Digit(right_count))
+        | (Pattern::Alphanumeric(left_count), Pattern::Alphanumeric(right_count))
+        | (Pattern::Wildcard(left_count), Pattern::Wildcard(right_count)) => {
+            *left_count = left_count.combine(right_count);
+            true
+        }
+        (
+            Pattern::CharGroup(left_group, left_count),
+            Pattern::CharGroup(right_group, right_count),
+        ) if left_group == right_group => {
+            *left_count = left_count.combine(right_count);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn referenced_groups(patterns: &[Pattern]) -> Vec<usize> {
+    let mut referenced = Vec::new();
+    collect_referenced_groups(patterns, &mut referenced);
+    referenced.sort_unstable();
+    referenced.dedup();
+    referenced
+}
+
+fn collect_referenced_groups(patterns: &[Pattern], referenced: &mut Vec<usize>) {
+    for pattern in patterns {
+        match pattern {
+            Pattern::Alternation { alternatives, .. } => {
+                for alternative in alternatives {
+                    collect_referenced_groups(alternative, referenced);
+                }
+            }
+            Pattern::CapturedGroup { patterns, .. } => {
+                collect_referenced_groups(patterns, referenced);
+            }
+            Pattern::Backreference(group) => referenced.push(group - 1),
+            Pattern::Literal(_, _)
+            | Pattern::Digit(_)
+            | Pattern::Alphanumeric(_)
+            | Pattern::Wildcard(_)
+            | Pattern::CharGroup(_, _) => {}
+        }
+    }
+}
+
+fn build_group_slots(referenced_groups: &[usize]) -> Vec<Option<usize>> {
+    let Some(max_group) = referenced_groups.iter().copied().max() else {
+        return Vec::new();
+    };
+
+    let mut slots = vec![None; max_group + 1];
+    for (slot, group_idx) in referenced_groups.iter().copied().enumerate() {
+        slots[group_idx] = Some(slot);
+    }
+    slots
+}
+
+fn detect_fast_path(patterns: &[Pattern]) -> Option<SingleCaptureLiteralBackref> {
+    let (first, remaining) = patterns.split_first()?;
+    let Pattern::CapturedGroup {
+        idx,
+        patterns: inner,
+        count,
+    } = first
+    else {
+        return None;
+    };
+
+    if *idx != 0 || !count.is_exactly_one() {
+        return None;
+    }
+
+    let [capture_pattern] = inner.as_slice() else {
+        return None;
+    };
+    let matcher = RepeatedAtomMatcher::from_pattern(capture_pattern)?;
+    let (separator, literal_count) = leading_literal_sequence(remaining)?;
+    let tail = &remaining[literal_count..];
+
+    if tail.len() == 1 && matches!(tail[0], Pattern::Backreference(1)) {
+        Some(SingleCaptureLiteralBackref { matcher, separator })
+    } else {
+        None
+    }
+}
+
+fn extract_anchor_literal(patterns: &[Pattern]) -> Option<AnchorLiteral> {
+    let mut collector = AnchorCollector::default();
+    collector.visit_sequence(patterns, Some(0));
+    collector
+        .best
+        .as_ref()
+        .map(|(text, prefix_width)| AnchorLiteral {
+            text: text.clone(),
+            prefix_width: *prefix_width,
+        })
+}
+
+fn candidate_strategy_for(
+    start_anchor: bool,
+    anchor: Option<&AnchorLiteral>,
+    patterns: &[Pattern],
+    start_predicate: &StartPredicate,
+) -> CandidateStrategy {
+    if start_anchor {
+        return CandidateStrategy::StartPredicateScan;
+    }
+
+    let Some(anchor) = anchor else {
+        return CandidateStrategy::StartPredicateScan;
+    };
+
+    if anchor.prefix_width.is_some() {
+        CandidateStrategy::FixedPrefixAnchor
+    } else if should_use_variable_prefix_anchor(patterns, anchor, start_predicate) {
+        CandidateStrategy::VariablePrefixLiteralAnchor
+    } else {
+        CandidateStrategy::StartPredicateScan
+    }
+}
+
+fn should_use_variable_prefix_anchor(
+    patterns: &[Pattern],
+    anchor: &AnchorLiteral,
+    start_predicate: &StartPredicate,
+) -> bool {
+    let Some((first, remaining)) = patterns.split_first() else {
+        return false;
+    };
+
+    matches_simple_variable_prefix(first, start_predicate)
+        && leading_literal_sequence(remaining).is_some_and(|(literal, _)| literal == anchor.text)
+}
+
+fn matches_simple_variable_prefix(pattern: &Pattern, start_predicate: &StartPredicate) -> bool {
+    let count = pattern.count();
+    let (min, max) = count.repetition_bounds();
+
+    min > 0
+        && max.is_none()
+        && required_start_predicate(pattern)
+            .as_ref()
+            .is_some_and(|candidate| candidate == start_predicate)
+}
+
+fn first_required_start_predicate(patterns: &[Pattern]) -> Option<StartPredicate> {
+    for pattern in patterns {
+        if let Some(predicate) = required_start_predicate(pattern) {
+            if pattern.count().repetition_bounds().0 > 0 {
+                return Some(predicate);
+            }
+        }
+
+        if pattern.count().repetition_bounds().0 > 0 {
+            return None;
+        }
+    }
+
+    None
+}
+
+fn required_start_predicate(pattern: &Pattern) -> Option<StartPredicate> {
+    match pattern {
+        Pattern::Literal(ch, _) => Some(StartPredicate::Literal(*ch)),
+        Pattern::Digit(_) => Some(StartPredicate::Digit),
+        Pattern::Alphanumeric(_) => Some(StartPredicate::Word),
+        Pattern::Wildcard(_) => Some(StartPredicate::Wildcard),
+        Pattern::CharGroup(group, _) => Some(StartPredicate::CharGroup(group.clone())),
+        Pattern::CapturedGroup { patterns, .. } => first_required_start_predicate(patterns),
+        Pattern::Alternation { alternatives, .. } => {
+            let mut predicates = alternatives
+                .iter()
+                .map(|alternative| first_required_start_predicate(alternative))
+                .collect::<Option<Vec<_>>>()?;
+            let first = predicates.pop()?;
+            predicates
+                .into_iter()
+                .all(|candidate| candidate == first)
+                .then_some(first)
+        }
+        Pattern::Backreference(_) => None,
+    }
+}
+
+fn leading_literal_sequence(patterns: &[Pattern]) -> Option<(String, usize)> {
+    let mut literal = String::new();
+    let mut consumed = 0;
+
+    for pattern in patterns {
+        let Some((ch, repetitions)) = literal_run_atom(pattern) else {
+            break;
+        };
+        literal.extend(std::iter::repeat_n(ch, repetitions));
+        consumed += 1;
+    }
+
+    (!literal.is_empty()).then_some((literal, consumed))
+}
+
+fn literal_run_atom(pattern: &Pattern) -> Option<(char, usize)> {
+    match pattern {
+        Pattern::Literal(ch, count) => count.fixed_repetitions().map(|count| (*ch, count)),
+        _ => None,
+    }
+}
+
+fn fixed_width(pattern: &Pattern) -> Option<usize> {
+    let repetitions = pattern.count().fixed_repetitions()?;
+    let single = match pattern {
+        Pattern::Literal(_, _)
+        | Pattern::Digit(_)
+        | Pattern::Alphanumeric(_)
+        | Pattern::Wildcard(_)
+        | Pattern::CharGroup(_, _) => Some(1),
+        Pattern::CapturedGroup { patterns, .. } => sequence_fixed_width(patterns),
+        Pattern::Alternation { alternatives, .. } => {
+            let mut widths = alternatives
+                .iter()
+                .map(|alternative| sequence_fixed_width(alternative));
+            let first = widths.next()??;
+            widths.all(|width| width == Some(first)).then_some(first)
+        }
+        Pattern::Backreference(_) => None,
+    }?;
+
+    Some(single * repetitions)
+}
+
+fn sequence_fixed_width(patterns: &[Pattern]) -> Option<usize> {
+    let mut total = 0;
+    for pattern in patterns {
+        total += fixed_width(pattern)?;
+    }
+    Some(total)
+}
+
+fn visit_anchor_hits<T>(
+    input: &str,
+    scan_start: usize,
+    literal: &str,
+    mut visit: impl FnMut(usize) -> Option<T>,
+) -> Option<T> {
+    let mut search_from = scan_start;
+
+    while let Some(anchor_start) = find_literal_from(input, search_from, literal) {
+        if let Some(result) = visit(anchor_start) {
+            return Some(result);
+        }
+
+        let Some(next) = next_char_boundary(input, anchor_start) else {
+            break;
+        };
+        search_from = next;
+    }
+
+    None
+}
+
+fn visit_scan_candidates<T>(
+    input: &str,
+    scan_start: usize,
+    upper_bound: usize,
+    predicate: &StartPredicate,
+    mut visit: impl FnMut(usize) -> Option<T>,
+) -> Option<T> {
+    let mut current = scan_start;
+    while current <= upper_bound {
+        if matches!(predicate, StartPredicate::Any) || predicate.matches_at(input, current) {
+            if let Some(result) = visit(current) {
+                return Some(result);
+            }
+        }
+        let Some(next) = next_char_boundary(input, current) else {
+            break;
+        };
+        current = next;
+    }
+
+    None
+}
+
+fn visit_bounded_backward_candidates<T>(
+    input: &str,
+    scan_start: usize,
+    upper_bound: usize,
+    predicate: &StartPredicate,
+    mut visit: impl FnMut(usize) -> Option<T>,
+) -> Option<T> {
+    if upper_bound < scan_start || !predicate.matches_at(input, upper_bound) {
+        return None;
+    }
+
+    let mut earliest = upper_bound;
+    while let Some(previous) = previous_char_boundary(input, earliest) {
+        if previous < scan_start || !predicate.matches_at(input, previous) {
+            break;
+        }
+        earliest = previous;
+    }
+
+    let mut current = earliest;
+    loop {
+        if let Some(result) = visit(current) {
+            return Some(result);
+        }
+        if current == upper_bound {
+            break;
+        }
+        current = next_char_boundary(input, current).expect("candidate boundary should advance");
+    }
+
+    None
+}
+
+fn find_literal_from(input: &str, search_from: usize, literal: &str) -> Option<usize> {
+    input
+        .get(search_from..)?
+        .find(literal)
+        .map(|offset| search_from + offset)
 }
 
 fn matches_literal(input: &str, pos: usize, expected: char) -> bool {
@@ -1401,6 +1227,10 @@ fn matches_word(input: &str, pos: usize) -> bool {
 
 fn matches_group(input: &str, pos: usize, group: &CharGroup) -> bool {
     match_char(input, pos, |current| group.matches(current)).is_some()
+}
+
+fn combine_widths(left: Option<usize>, right: Option<usize>) -> Option<usize> {
+    Some(left? + right?)
 }
 
 fn match_char(input: &str, pos: usize, pred: impl Fn(char) -> bool) -> Option<usize> {
