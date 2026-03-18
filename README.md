@@ -79,7 +79,6 @@ Create the Python virtual environment and install plotting dependencies:
 
 ```sh
 uv venv
-source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
@@ -134,7 +133,9 @@ The benchmark uses multiple corpora instead of a single file because each one st
 
 ## Benchmark Chart
 
-![Benchmark comparison](bench/benchmark.svg)
+The generated chart shows the speedup of `grep-rust` over system `grep`. Values above `1.0x` mean `grep-rust` is faster.
+
+![Benchmark speedup comparison](bench/benchmark.svg)
 
 ## Optimization Notes
 

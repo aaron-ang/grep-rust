@@ -1,0 +1,141 @@
+{
+  "title": "grep-rust vs grep",
+  "cases": [
+    {
+      "dataset_label": "Log corpus",
+      "case_label": "literal prefix",
+      "chart_label": "literal prefix",
+      "pattern": "matched_line_[0123456789]+",
+      "input_file": "bench/data.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 37.95484031333333,
+          "stddev_ms": 27.221297958560704
+        },
+        "grep baseline": {
+          "mean_ms": 130.11198163000003,
+          "stddev_ms": 28.40457285268816
+        }
+      }
+    },
+    {
+      "dataset_label": "Log corpus",
+      "case_label": "anchored prefix",
+      "chart_label": "anchored prefix",
+      "pattern": "^log=[0123456789]+ level=INFO",
+      "input_file": "bench/data.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 39.721187116363645,
+          "stddev_ms": 30.3117683074793
+        },
+        "grep baseline": {
+          "mean_ms": 166.37435612210527,
+          "stddev_ms": 40.940897133318096
+        }
+      }
+    },
+    {
+      "dataset_label": "Log corpus",
+      "case_label": "dense alternation",
+      "chart_label": "dense alternation",
+      "pattern": "message=(matched_line|ordinary_line)_[0123456789]+",
+      "input_file": "bench/data.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 69.07610860677968,
+          "stddev_ms": 39.82106810060863
+        },
+        "grep baseline": {
+          "mean_ms": 140.55529724545457,
+          "stddev_ms": 33.34209977825514
+        }
+      }
+    },
+    {
+      "dataset_label": "Word corpus",
+      "case_label": "literal phrase",
+      "chart_label": "literal phrase",
+      "pattern": "cat dog bird",
+      "input_file": "bench/words.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 14.885467560779224,
+          "stddev_ms": 2.446745208356497
+        },
+        "grep baseline": {
+          "mean_ms": 26.822635090000002,
+          "stddev_ms": 6.945326582298597
+        }
+      }
+    },
+    {
+      "dataset_label": "Word corpus",
+      "case_label": "anchored alternation",
+      "chart_label": "anchored alternation",
+      "pattern": "^(cat dog bird|dog bird cat)$",
+      "input_file": "bench/words.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 20.107424734798208,
+          "stddev_ms": 26.171597229945878
+        },
+        "grep baseline": {
+          "mean_ms": 42.78639994500001,
+          "stddev_ms": 22.21689813266891
+        }
+      }
+    },
+    {
+      "dataset_label": "Word corpus",
+      "case_label": "broad wildcard",
+      "chart_label": "broad wildcard",
+      "pattern": "^.+ .+ .+$",
+      "input_file": "bench/words.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 19.110376780579703,
+          "stddev_ms": 7.975765222369246
+        },
+        "grep baseline": {
+          "mean_ms": 94.00882028615385,
+          "stddev_ms": 16.45165163146224
+        }
+      }
+    },
+    {
+      "dataset_label": "Near-miss corpus",
+      "case_label": "quantified backtracking",
+      "chart_label": "quantified backtracking",
+      "pattern": "a+a+a+a+b",
+      "input_file": "bench/nearmiss_small.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 4.130181911653544,
+          "stddev_ms": 6.31645055903296
+        },
+        "grep baseline": {
+          "mean_ms": 7.06243709744681,
+          "stddev_ms": 11.118916826439216
+        }
+      }
+    },
+    {
+      "dataset_label": "Backreference corpus",
+      "case_label": "word repeat",
+      "chart_label": "word repeat",
+      "pattern": "(\\w+) and \\1",
+      "input_file": "bench/backref.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 422.32093018000006,
+          "stddev_ms": 11.636712344812759
+        },
+        "grep baseline": {
+          "mean_ms": 222.81961268000006,
+          "stddev_ms": 42.98361669601981
+        }
+      }
+    }
+  ]
+}
