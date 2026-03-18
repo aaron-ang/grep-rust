@@ -90,7 +90,10 @@ impl Parser {
                                     let upper = upper
                                         .parse()
                                         .expect("range upper bound quantifier should be a number");
-                                    assert!(lower <= upper, "Expected '{{n,m}}' quantifier with n <= m");
+                                    assert!(
+                                        lower <= upper,
+                                        "Expected '{{n,m}}' quantifier with n <= m"
+                                    );
                                     return Count::Range(lower, upper);
                                 }
                                 Some(c) if c.is_ascii_digit() => upper.push(c),

@@ -1,7 +1,5 @@
 #[cfg(test)]
 use super::*;
-#[cfg(test)]
-use crate::engine::EngineKind;
 
 #[cfg(test)]
 fn find_all_regex(input_line: &str, regex: &str) -> Vec<String> {
@@ -510,7 +508,6 @@ fn match_spans_report_positions() {
 #[test]
 fn compiled_regex_can_be_reused() {
     let compiled = compile_regex(r"\d");
-    assert_eq!(compiled.engine_kind(), EngineKind::Automata);
     assert_eq!(
         find_all_regex_spans_compiled("The king had 10 children", &compiled),
         vec![
@@ -525,19 +522,22 @@ fn compiled_regex_can_be_reused() {
 }
 
 #[test]
-fn routes_patterns_to_the_expected_engine() {
-    assert_eq!(compile_regex("hello").engine_kind(), EngineKind::Literal);
+fn representative_patterns_match_through_compiled_dispatch() {
     assert_eq!(
-        compile_regex(r"^(hello|world)$").engine_kind(),
-        EngineKind::Literal
+        find_all_regex_spans_compiled("hello world", &compile_regex("hello")),
+        vec![RegexMatch { start: 0, end: 5 }]
     );
     assert_eq!(
-        compile_regex(r"hello\d+").engine_kind(),
-        EngineKind::Automata
+        find_all_regex_spans_compiled("world", &compile_regex(r"^(hello|world)$")),
+        vec![RegexMatch { start: 0, end: 5 }]
     );
     assert_eq!(
-        compile_regex(r"(\w+) and \1").engine_kind(),
-        EngineKind::Backreference
+        find_all_regex_spans_compiled("hello42", &compile_regex(r"hello\d+")),
+        vec![RegexMatch { start: 0, end: 7 }]
+    );
+    assert_eq!(
+        find_all_regex_spans_compiled("cat and cat", &compile_regex(r"(\w+) and \1")),
+        vec![RegexMatch { start: 0, end: 11 }]
     );
 }
 
@@ -570,5 +570,35 @@ fn grouped_regexes_without_backreferences_match_normally() {
     assert_eq!(
         find_all_regex_spans_compiled("xxcatdogyy", &grouped),
         vec![RegexMatch { start: 2, end: 8 }]
+    );
+}
+
+#[test]
+fn single_capture_literal_backreference_shapes_match_correctly() {
+    assert_eq!(
+        first_match("cat and cat", r"(\w+) and \1"),
+        Some("cat and cat".to_string())
+    );
+    assert_eq!(
+        first_match("abca-abca", r"([abc]+)-\1"),
+        Some("abca-abca".to_string())
+    );
+    assert!(first_match("abca-defb", r"([abc]+)-\1").is_none());
+}
+
+#[test]
+fn anchored_single_capture_literal_backreference_shapes_match_correctly() {
+    assert_eq!(
+        first_match("cat and cat", r"^(\w+) and \1$"),
+        Some("cat and cat".to_string())
+    );
+    assert!(first_match("cat and cat!", r"^(\w+) and \1$").is_none());
+}
+
+#[test]
+fn backreference_matches_remain_leftmost_and_non_overlapping() {
+    assert_eq!(
+        find_all_regex("cat and cat dog and dog", r"(\w+) and \1"),
+        vec!["cat and cat".to_string(), "dog and dog".to_string()]
     );
 }

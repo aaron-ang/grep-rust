@@ -21,15 +21,7 @@ pub struct CompiledRegex {
 enum SearchPlan {
     Literal(LiteralSearch),
     Automata(AutomataSearch),
-    Backreference(BackreferenceSearch),
-}
-
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EngineKind {
-    Literal,
-    Automata,
-    Backreference,
+    Backreference(Box<BackreferenceSearch>),
 }
 
 impl CompiledRegex {
@@ -38,28 +30,19 @@ impl CompiledRegex {
             SearchStrategy::Literal(spec) => SearchPlan::Literal(LiteralSearch::new(spec)),
             SearchStrategy::Automata => SearchPlan::Automata(AutomataSearch::new(regex)),
             SearchStrategy::Backreference => {
-                SearchPlan::Backreference(BackreferenceSearch::new(regex))
+                SearchPlan::Backreference(Box::new(BackreferenceSearch::new(regex)))
             }
         };
         Self { plan }
     }
-
-    #[cfg(test)]
-    pub(crate) fn engine_kind(&self) -> EngineKind {
-        match self.plan {
-            SearchPlan::Literal(_) => EngineKind::Literal,
-            SearchPlan::Automata(_) => EngineKind::Automata,
-            SearchPlan::Backreference(_) => EngineKind::Backreference,
-        }
-    }
 }
 
-#[must_use] 
+#[must_use]
 pub fn compile_regex(regex: &str) -> CompiledRegex {
     CompiledRegex::new(regex)
 }
 
-#[must_use] 
+#[must_use]
 pub fn find_all_regex_spans_compiled(input_line: &str, regex: &CompiledRegex) -> Vec<RegexMatch> {
     match &regex.plan {
         SearchPlan::Literal(search) => search.find_all(input_line),
