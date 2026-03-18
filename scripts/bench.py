@@ -38,6 +38,7 @@ HYPERFINE_EXPORT_FILE = Path("bench/.hyperfine.json")
 BENCH_DATA_FILE = Path("bench/data.txt")
 WORDS_DATA_FILE = Path("bench/words.txt")
 NEARMISS_DATA_FILE = Path("bench/nearmiss_small.txt")
+BACKREF_DATA_FILE = Path("bench/backref.txt")
 
 
 def fail(message: str) -> None:
@@ -89,13 +90,24 @@ def benchmark_cases() -> list[BenchmarkCase]:
             pattern="a+a+a+a+b",
             input_file=NEARMISS_DATA_FILE,
         ),
+        BenchmarkCase(
+            dataset_label="Backreference corpus",
+            case_label="word repeat",
+            pattern=r"(\w+) and \1",
+            input_file=BACKREF_DATA_FILE,
+        ),
     ]
 
 
 def ensure_benchmark_inputs() -> None:
     if all(
         input_file.is_file()
-        for input_file in (BENCH_DATA_FILE, WORDS_DATA_FILE, NEARMISS_DATA_FILE)
+        for input_file in (
+            BENCH_DATA_FILE,
+            WORDS_DATA_FILE,
+            NEARMISS_DATA_FILE,
+            BACKREF_DATA_FILE,
+        )
     ):
         return
 

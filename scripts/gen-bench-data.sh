@@ -64,10 +64,29 @@ generate_nearmiss() {
   printf 'wrote %s lines to %s\n' "$line_count" "$out_file"
 }
 
+generate_backref() {
+  local out_file="${1:-bench/backref.txt}"
+  local line_count="${2:-50000}"
+
+  mkdir -p "$(dirname "$out_file")"
+  : > "$out_file"
+
+  for i in $(seq 1 "$line_count"); do
+    if (( i % 4 == 0 )); then
+      printf 'token%06d and token%06d\n' "$i" "$i" >> "$out_file"
+    else
+      printf 'token%06d and other%06d\n' "$i" "$i" >> "$out_file"
+    fi
+  done
+
+  printf 'wrote %s lines to %s\n' "$line_count" "$out_file"
+}
+
 generate_all() {
   generate_logs "bench/data.txt" "200000"
   generate_words "bench/words.txt" "100000"
   generate_nearmiss "bench/nearmiss_small.txt" "2000"
+  generate_backref "bench/backref.txt" "50000"
 }
 
 case "${1:-all}" in
@@ -83,8 +102,11 @@ case "${1:-all}" in
   nearmiss)
     generate_nearmiss "${2:-bench/nearmiss_small.txt}" "${3:-2000}"
     ;;
+  backref)
+    generate_backref "${2:-bench/backref.txt}" "${3:-50000}"
+    ;;
   *)
-    # Preserve the old one-argument behavior for log corpus generation.
-    generate_logs "$1" "${2:-200000}"
+    echo "usage: $0 [all|logs|words|nearmiss|backref]" >&2
+    exit 1
     ;;
 esac

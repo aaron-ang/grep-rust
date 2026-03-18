@@ -113,6 +113,8 @@ By default this benchmarks `grep-rust` against system `grep` across a fixed set 
   - `^.+ .+ .+$`
 - `bench/nearmiss_small.txt`
   - `a+a+a+a+b`
+- `bench/backref.txt`
+  - `(\w+) and \1`
 
 `scripts/gen-bench-data.sh` generates all three corpora, and `scripts/bench.py` will call it automatically if any benchmark input is missing. The benchmark data and chart are written to:
 
@@ -128,6 +130,7 @@ The benchmark uses multiple corpora instead of a single file because each one st
 - `bench/data.txt` covers literal prefixes, anchors, and alternation on structured log lines
 - `bench/words.txt` covers simple literal and broad wildcard scans on short repeated phrases
 - `bench/nearmiss_small.txt` stresses quantified near-miss backtracking
+- `bench/backref.txt` exercises the custom backreference fallback path
 
 ## Benchmark Chart
 
