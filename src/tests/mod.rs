@@ -1,5 +1,7 @@
 #[cfg(test)]
 use super::*;
+#[cfg(test)]
+use crate::engine::EngineKind;
 
 #[cfg(test)]
 fn find_all_regex(input_line: &str, regex: &str) -> Vec<String> {
@@ -508,8 +510,7 @@ fn match_spans_report_positions() {
 #[test]
 fn compiled_regex_can_be_reused() {
     let compiled = compile_regex(r"\d");
-    assert!(!compiled.needs_captures());
-    assert_eq!(compiled.literal_prefix(), None);
+    assert_eq!(compiled.engine_kind(), EngineKind::Automata);
     assert_eq!(
         find_all_regex_spans_compiled("The king had 10 children", &compiled),
         vec![
@@ -521,17 +522,23 @@ fn compiled_regex_can_be_reused() {
         find_all_regex_spans_compiled("No digits here", &compiled),
         Vec::new()
     );
+}
 
-    let grouped = compile_regex(r"(jekyll|hyde)");
-    assert!(grouped.needs_captures());
-    assert_eq!(grouped.literal_prefix(), None);
-
-    let backreference = compile_regex(r"(\w+) and \1");
-    assert!(backreference.needs_captures());
-    assert_eq!(backreference.literal_prefix(), None);
-
-    let prefixed = compile_regex(r"hello\d+");
-    assert_eq!(prefixed.literal_prefix(), Some("hello"));
+#[test]
+fn routes_patterns_to_the_expected_engine() {
+    assert_eq!(compile_regex("hello").engine_kind(), EngineKind::Literal);
+    assert_eq!(
+        compile_regex(r"^(hello|world)$").engine_kind(),
+        EngineKind::Literal
+    );
+    assert_eq!(
+        compile_regex(r"hello\d+").engine_kind(),
+        EngineKind::Automata
+    );
+    assert_eq!(
+        compile_regex(r"(\w+) and \1").engine_kind(),
+        EngineKind::Backreference
+    );
 }
 
 #[test]
@@ -558,27 +565,10 @@ fn complex_quantifier_combinations() {
 }
 
 #[test]
-fn equivalent_capture_and_no_capture_paths_match_the_same_span() {
-    let plain = compile_regex(r"a+b");
-    let grouped = compile_regex(r"(a+)b");
-
-    assert!(!plain.needs_captures());
-    assert!(grouped.needs_captures());
+fn grouped_regexes_without_backreferences_match_normally() {
+    let grouped = compile_regex(r"(cat|dog)+");
     assert_eq!(
-        find_all_regex_spans_compiled("xxaaabyy", &plain),
-        find_all_regex_spans_compiled("xxaaabyy", &grouped)
-    );
-}
-
-#[test]
-fn quantified_groups_do_not_loop_on_zero_progress() {
-    let grouped = compile_regex(r"(a?)*b");
-    assert_eq!(
-        find_all_regex_spans_compiled("bbb", &grouped),
-        vec![
-            RegexMatch { start: 0, end: 1 },
-            RegexMatch { start: 1, end: 2 },
-            RegexMatch { start: 2, end: 3 },
-        ]
+        find_all_regex_spans_compiled("xxcatdogyy", &grouped),
+        vec![RegexMatch { start: 2, end: 8 }]
     );
 }

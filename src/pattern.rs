@@ -1,4 +1,4 @@
-use crate::parser::Parser;
+use crate::{engine::RegexMatch, parser::Parser};
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
@@ -54,17 +54,11 @@ impl Pattern {
             | Pattern::Digit(count)
             | Pattern::Alphanumeric(count)
             | Pattern::Wildcard(count)
-            | Pattern::CharGroup(_, count) => *count,
-            Pattern::Alternation { count, .. } | Pattern::CapturedGroup { count, .. } => *count,
+            | Pattern::CharGroup(_, count)
+            | Pattern::Alternation { count, .. }
+            | Pattern::CapturedGroup { count, .. } => *count,
             Pattern::Backreference(_) => Count::One,
         }
-    }
-
-    fn uses_capture_engine(&self) -> bool {
-        matches!(
-            self,
-            Pattern::Alternation { .. } | Pattern::CapturedGroup { .. } | Pattern::Backreference(_)
-        )
     }
 
     fn modifies_captures(&self) -> bool {
@@ -95,6 +89,14 @@ impl Count {
         matches!(self, Count::ZeroOrOne)
     }
 
+    fn fixed_repetitions(self) -> Option<usize> {
+        match self {
+            Count::One => Some(1),
+            Count::Exact(n) => Some(n),
+            _ => None,
+        }
+    }
+
     fn repetition_bounds(self) -> (usize, Option<usize>) {
         match self {
             Count::One => (1, Some(1)),
@@ -106,9 +108,33 @@ impl Count {
             Count::Range(min, max) => (min, Some(max)),
         }
     }
+
+    fn from_bounds(min: usize, max: Option<usize>) -> Self {
+        match (min, max) {
+            (1, Some(1)) => Count::One,
+            (0, Some(1)) => Count::ZeroOrOne,
+            (1, None) => Count::OneOrMore,
+            (0, None) => Count::ZeroOrMore,
+            (exact, Some(max)) if exact == max => Count::Exact(exact),
+            (min, None) => Count::AtLeast(min),
+            (min, Some(max)) => Count::Range(min, max),
+        }
+    }
+
+    fn combine(self, other: Self) -> Self {
+        let (left_min, left_max) = self.repetition_bounds();
+        let (right_min, right_max) = other.repetition_bounds();
+        let min = left_min + right_min;
+        let max = match (left_max, right_max) {
+            (Some(left), Some(right)) => Some(left + right),
+            _ => None,
+        };
+
+        Count::from_bounds(min, max)
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CharGroup {
     negated: bool,
     ascii_members: [bool; 128],
@@ -135,42 +161,25 @@ impl CharGroup {
 }
 
 #[derive(Debug, Clone)]
-pub struct CompiledRegex {
+pub(crate) struct CompiledBackreferenceRegex {
     patterns: Vec<Pattern>,
     start_anchor: bool,
     end_anchor: bool,
-    needs_captures: bool,
     literal_prefix: Option<String>,
 }
 
-impl CompiledRegex {
+impl CompiledBackreferenceRegex {
     pub fn new(regex: &str) -> Self {
         let (patterns, start_anchor, end_anchor) = Pattern::parse(regex);
-        let needs_captures = patterns.iter().any(Pattern::uses_capture_engine);
+        let patterns = normalize_patterns(patterns);
         let literal_prefix = leading_literal_prefix(&patterns);
         Self {
             patterns,
             start_anchor,
             end_anchor,
-            needs_captures,
             literal_prefix,
         }
     }
-
-    pub(crate) fn needs_captures(&self) -> bool {
-        self.needs_captures
-    }
-
-    #[cfg(test)]
-    pub(crate) fn literal_prefix(&self) -> Option<&str> {
-        self.literal_prefix.as_deref()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RegexMatch {
-    pub start: usize,
-    pub end: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -181,11 +190,14 @@ pub struct CaptureSpan {
 
 type Captures = Vec<Option<CaptureSpan>>;
 
-pub fn compile_regex(regex: &str) -> CompiledRegex {
-    CompiledRegex::new(regex)
+pub(crate) fn compile_backreference_regex(regex: &str) -> CompiledBackreferenceRegex {
+    CompiledBackreferenceRegex::new(regex)
 }
 
-pub fn find_all_regex_spans_compiled(input_line: &str, regex: &CompiledRegex) -> Vec<RegexMatch> {
+pub(crate) fn find_all_backreference_regex_spans_compiled(
+    input_line: &str,
+    regex: &CompiledBackreferenceRegex,
+) -> Vec<RegexMatch> {
     let mut matches = Vec::new();
 
     if regex.start_anchor {
@@ -223,7 +235,12 @@ fn leading_literal_prefix(patterns: &[Pattern]) -> Option<String> {
 
     for pattern in patterns {
         match pattern {
-            Pattern::Literal(ch, count) if count.is_exactly_one() => prefix.push(*ch),
+            Pattern::Literal(ch, count) => {
+                let Some(repetitions) = count.fixed_repetitions() else {
+                    break;
+                };
+                prefix.extend(std::iter::repeat_n(*ch, repetitions));
+            }
             _ => break,
         }
     }
@@ -231,38 +248,77 @@ fn leading_literal_prefix(patterns: &[Pattern]) -> Option<String> {
     (!prefix.is_empty()).then_some(prefix)
 }
 
-fn match_from(regex: &CompiledRegex, input: &str, start: usize) -> Option<usize> {
-    let end = if regex.needs_captures() {
-        let (end, _) = match_patterns_with_captures(input, &regex.patterns, start, Vec::new())?;
-        end
-    } else {
-        match_patterns_without_captures(input, &regex.patterns, start)?
-    };
+fn normalize_patterns(patterns: Vec<Pattern>) -> Vec<Pattern> {
+    let mut normalized = Vec::with_capacity(patterns.len());
+
+    for pattern in patterns {
+        let pattern = match pattern {
+            Pattern::Alternation {
+                idx,
+                alternatives,
+                count,
+            } => Pattern::Alternation {
+                idx,
+                alternatives: alternatives.into_iter().map(normalize_patterns).collect(),
+                count,
+            },
+            Pattern::CapturedGroup {
+                idx,
+                patterns,
+                count,
+            } => Pattern::CapturedGroup {
+                idx,
+                patterns: normalize_patterns(patterns),
+                count,
+            },
+            other => other,
+        };
+
+        if let Some(previous) = normalized.last_mut() {
+            if merge_adjacent_simple_patterns(previous, &pattern) {
+                continue;
+            }
+        }
+
+        normalized.push(pattern);
+    }
+
+    normalized
+}
+
+fn merge_adjacent_simple_patterns(previous: &mut Pattern, next: &Pattern) -> bool {
+    match (previous, next) {
+        (Pattern::Literal(left, left_count), Pattern::Literal(right, right_count))
+            if left == right =>
+        {
+            *left_count = left_count.combine(*right_count);
+            true
+        }
+        (Pattern::Digit(left_count), Pattern::Digit(right_count))
+        | (Pattern::Alphanumeric(left_count), Pattern::Alphanumeric(right_count))
+        | (Pattern::Wildcard(left_count), Pattern::Wildcard(right_count)) => {
+            *left_count = left_count.combine(*right_count);
+            true
+        }
+        (
+            Pattern::CharGroup(left_group, left_count),
+            Pattern::CharGroup(right_group, right_count),
+        ) if left_group == right_group => {
+            *left_count = left_count.combine(*right_count);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn match_from(regex: &CompiledBackreferenceRegex, input: &str, start: usize) -> Option<usize> {
+    let (end, _) = match_patterns_with_captures(input, &regex.patterns, start, Vec::new())?;
 
     if !regex.end_anchor || end == input.len() {
         Some(end)
     } else {
         None
     }
-}
-
-fn match_patterns_without_captures(input: &str, patterns: &[Pattern], pos: usize) -> Option<usize> {
-    if patterns.is_empty() {
-        return Some(pos);
-    }
-
-    let pattern = &patterns[0];
-    let remaining = &patterns[1..];
-
-    match_with_count(
-        pattern.count(),
-        pos,
-        |current| {
-            let next = match_atom(pattern, input, *current)?;
-            Some((next, next != *current))
-        },
-        |candidate| match_patterns_without_captures(input, remaining, *candidate),
-    )
 }
 
 fn match_patterns_with_captures(
@@ -292,8 +348,8 @@ fn match_patterns_with_captures(
                 )?;
                 Some(((next_pos, next_captures), next_pos != *current_pos))
             },
-            |candidate| {
-                match_patterns_with_captures(input, remaining, candidate.0, candidate.1.clone())
+            |(pos, captures)| {
+                match_patterns_with_captures(input, remaining, *pos, captures.clone())
             },
         );
     }

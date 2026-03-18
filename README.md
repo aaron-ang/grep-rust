@@ -135,10 +135,12 @@ The benchmark uses multiple corpora instead of a single file because each one st
 
 ## Optimization Notes
 
-The current implementation is competitive with system `grep` mainly because it avoids unnecessary work:
+The current implementation is competitive with system `grep` mainly because it uses a hybrid search pipeline instead of one matcher for every pattern:
 
-- Regexes are compiled once and reused across lines
-- Matching stays on byte spans, with a fast path for patterns that do not need captures
-- Fixed literal prefixes and buffered output help cut down scanning and printing overhead
+- Pure literals and literal-only alternations are routed to `aho-corasick`
+- Regular regexes are compiled with `regex-automata`
+- Backreference patterns fall back to the custom matcher instead of slowing down the normal path
+- Searches return byte spans directly, so `-o` and highlighting reuse the same match data
+- Output stays buffered, which keeps printing overhead from dominating the benchmark
 
 The exact benchmark result is still workload-dependent, so some patterns will benefit more than others.

@@ -82,7 +82,7 @@ fn main() -> Result<()> {
     };
     writer.flush()?;
 
-    process::exit(if match_count > 0 { 0 } else { 1 });
+    process::exit(i32::from(match_count == 0));
 }
 
 fn process_lines<R: BufRead, W: Write>(
@@ -105,11 +105,9 @@ fn process_lines<R: BufRead, W: Write>(
                 writer.write_all(&line.as_bytes()[matched.start..matched.end])?;
                 writer.write_all(b"\n")?;
             }
-        } else {
-            if !matches.is_empty() {
-                match_count += 1;
-                write_rendered_line(writer, &line, &prefix, use_color, &matches)?;
-            }
+        } else if !matches.is_empty() {
+            match_count += 1;
+            write_rendered_line(writer, &line, &prefix, use_color, &matches)?;
         }
     }
     Ok(match_count)

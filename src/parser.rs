@@ -90,9 +90,7 @@ impl Parser {
                                     let upper = upper
                                         .parse()
                                         .expect("range upper bound quantifier should be a number");
-                                    if lower > upper {
-                                        panic!("Expected '{{n,m}}' quantifier with n <= m");
-                                    }
+                                    assert!(lower <= upper, "Expected '{{n,m}}' quantifier with n <= m");
                                     return Count::Range(lower, upper);
                                 }
                                 Some(c) if c.is_ascii_digit() => upper.push(c),
@@ -162,10 +160,9 @@ impl Parser {
                             alternation
                                 .push(self.read_group_items(&mut group_chars.chars().peekable()));
                             break;
-                        } else {
-                            num_open_parens -= 1;
-                            group_chars.push(')');
                         }
+                        num_open_parens -= 1;
+                        group_chars.push(')');
                     }
                     '|' if num_open_parens == 0 => {
                         alternation
@@ -182,7 +179,7 @@ impl Parser {
     fn read_group_items(&mut self, pattern: &mut Peekable<Chars>) -> Vec<Pattern> {
         let mut items = Vec::new();
         while pattern.peek().is_some() {
-            items.push(self.parse(pattern))
+            items.push(self.parse(pattern));
         }
         items
     }
