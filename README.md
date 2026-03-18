@@ -151,4 +151,30 @@ The current implementation is competitive with system `grep` mainly because it u
 - Searches return byte spans directly, so `-o` and highlighting reuse the same match data
 - Output stays buffered, which keeps printing overhead from dominating the benchmark
 
+### Backreference Path
+
+Backreference patterns go through a separate compiled fallback engine. The compiler first tries to recognize a reusable fast path before falling back to the generic VM.
+
+```mermaid
+flowchart TD
+    A[regex with backreference] --> B[compile BackreferencePlan]
+    B --> C{shape detected?}
+    C -->|single capture replay| D[SingleCaptureLiteralBackref]
+    C -->|two-part replay| E[TwoPartReplayBackref]
+    C -->|none| F[generic VM fallback]
+    D --> G[find literal separator]
+    G --> H[scan repeated atom on left and right]
+    H --> I[compare slices directly]
+    E --> J[find outer separator]
+    J --> K[scan backward for atom 2, middle literal, atom 1]
+    K --> L[replay full left slice on the right]
+    F --> M[candidate generation from anchor or start predicate]
+    M --> N[execute backreference VM]
+    I --> O[RegexMatch spans]
+    L --> O
+    N --> O
+```
+
+The current fast paths cover patterns like `(\w+) and \1`, `(\w+)-(\d+) and \1-\2`, and `^((\w+)-(\d+)) and \1$`. Other backreference patterns still run through the VM for correctness.
+
 The exact benchmark result is still workload-dependent, so some patterns will benefit more than others.
