@@ -10,5 +10,7 @@ target/
 *.pdb
 
 __pycache__/
+.venv/
 
-bench/data.txt
+bench/*.txt
+bench/*.json

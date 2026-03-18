@@ -75,29 +75,59 @@ Install `hyperfine` locally:
 brew install hyperfine
 ```
 
-Generate a synthetic corpus:
+Create the Python virtual environment and install plotting dependencies:
 
 ```sh
-./scripts/gen-bench-data.sh
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
-Run the benchmark and generate an SVG chart:
+Generate all benchmark corpora:
 
 ```sh
-./scripts/bench.py
+uv run scripts/gen-bench-data.sh
 ```
 
-By default this benchmarks `grep-rust` against system `grep` on `bench/data.txt` and writes:
+Run the benchmark matrix and generate the SVG chart:
+
+```sh
+uv run scripts/bench.py
+```
+
+Re-render the chart from the saved benchmark JSON without rerunning `hyperfine`:
+
+```sh
+uv run scripts/plot.py
+```
+
+By default this benchmarks `grep-rust` against system `grep` across a fixed set of patterns:
+
+- `bench/data.txt`
+  - `matched_line_[0123456789]+`
+  - `^log=[0123456789]+ level=INFO`
+  - `message=(matched_line|ordinary_line)_[0123456789]+`
+- `bench/words.txt`
+  - `cat dog bird`
+  - `^(cat dog bird|dog bird cat)$`
+  - `^.+ .+ .+$`
+- `bench/nearmiss_small.txt`
+  - `a+a+a+a+b`
+
+`scripts/gen-bench-data.sh` generates all three corpora, and `scripts/bench.py` will call it automatically if any benchmark input is missing. The benchmark data and chart are written to:
 
 ```text
+bench/benchmark.json
 bench/benchmark.svg
 ```
 
-You can override the regex pattern and input file:
+`scripts/bench.py` uses `hyperfine --warmup 3` and otherwise leaves hyperfine's run-count defaults in place.
 
-```sh
-./scripts/bench.py 'user_\d+' bench/data.txt
-```
+The benchmark uses multiple corpora instead of a single file because each one stresses a different behavior:
+
+- `bench/data.txt` covers literal prefixes, anchors, and alternation on structured log lines
+- `bench/words.txt` covers simple literal and broad wildcard scans on short repeated phrases
+- `bench/nearmiss_small.txt` stresses quantified near-miss backtracking
 
 ## Benchmark Chart
 

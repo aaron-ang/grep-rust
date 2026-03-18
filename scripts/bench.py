@@ -1,22 +1,43 @@
 #!/usr/bin/env python3
 
-import argparse
 import json
+import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
-from plot import write_svg_plot
+from plot import render_plot_from_json
 
 
-def build_command(binary: str, pattern: str, input_file: str) -> str:
-    return f"{binary} -E '{pattern}' '{input_file}'"
+@dataclass(frozen=True)
+class BenchmarkCase:
+    dataset_label: str
+    case_label: str
+    pattern: str
+    input_file: Path
+
+    @property
+    def chart_label(self) -> str:
+        return self.case_label
 
 
-def benchmark_labels() -> list[str]:
-    return ["grep-rust", "grep baseline"]
+@dataclass(frozen=True)
+class BenchmarkResult:
+    case: BenchmarkCase
+    grep_rust_ms: float
+    grep_rust_stddev_ms: float
+    grep_ms: float
+    grep_stddev_ms: float
+
+
+DEFAULT_OUTPUT_FILE = Path("bench/benchmark.svg")
+DEFAULT_JSON_FILE = Path("bench/benchmark.json")
+HYPERFINE_EXPORT_FILE = Path("bench/.hyperfine.json")
+BENCH_DATA_FILE = Path("bench/data.txt")
+WORDS_DATA_FILE = Path("bench/words.txt")
+NEARMISS_DATA_FILE = Path("bench/nearmiss_small.txt")
 
 
 def fail(message: str) -> None:
@@ -24,31 +45,130 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Benchmark grep-rust against system grep and generate an SVG chart."
+def benchmark_cases() -> list[BenchmarkCase]:
+    return [
+        BenchmarkCase(
+            dataset_label="Log corpus",
+            case_label="literal prefix",
+            pattern="matched_line_[0123456789]+",
+            input_file=BENCH_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Log corpus",
+            case_label="anchored prefix",
+            pattern="^log=[0123456789]+ level=INFO",
+            input_file=BENCH_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Log corpus",
+            case_label="dense alternation",
+            pattern="message=(matched_line|ordinary_line)_[0123456789]+",
+            input_file=BENCH_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Word corpus",
+            case_label="literal phrase",
+            pattern="cat dog bird",
+            input_file=WORDS_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Word corpus",
+            case_label="anchored alternation",
+            pattern="^(cat dog bird|dog bird cat)$",
+            input_file=WORDS_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Word corpus",
+            case_label="broad wildcard",
+            pattern="^.+ .+ .+$",
+            input_file=WORDS_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Near-miss corpus",
+            case_label="quantified backtracking",
+            pattern="a+a+a+a+b",
+            input_file=NEARMISS_DATA_FILE,
+        ),
+    ]
+
+
+def ensure_benchmark_inputs() -> None:
+    if all(
+        input_file.is_file()
+        for input_file in (BENCH_DATA_FILE, WORDS_DATA_FILE, NEARMISS_DATA_FILE)
+    ):
+        return
+
+    subprocess.run(["./scripts/gen-bench-data.sh"], check=True)
+
+
+def build_command(binary: str, pattern: str, input_file: Path) -> str:
+    return (
+        f"{shlex.quote(binary)} -E {shlex.quote(pattern)} "
+        f"{shlex.quote(str(input_file))} >/dev/null"
     )
-    parser.add_argument(
-        "-E",
-        "--pattern",
-        default=r"matched_line_\d+",
-        help="regex pattern to benchmark",
+
+
+def run_case(case: BenchmarkCase) -> BenchmarkResult:
+    grep_rust_cmd = build_command("target/release/grep-rust", case.pattern, case.input_file)
+    grep_cmd = build_command("grep", case.pattern, case.input_file)
+    subprocess.run(
+        [
+            "hyperfine",
+            "--shell",
+            "bash",
+            "--warmup",
+            "3",
+            "--export-json",
+            str(HYPERFINE_EXPORT_FILE),
+            grep_rust_cmd,
+            grep_cmd,
+        ],
+        check=True,
     )
-    parser.add_argument(
-        "-i",
-        "--input-file",
-        type=Path,
-        default=Path("bench/data.txt"),
-        help="input file used for benchmarking",
+    payload = json.loads(HYPERFINE_EXPORT_FILE.read_text())
+    HYPERFINE_EXPORT_FILE.unlink(missing_ok=True)
+
+    grep_rust, grep = payload["results"]
+    return BenchmarkResult(
+        case=case,
+        grep_rust_ms=grep_rust["mean"] * 1000,
+        grep_rust_stddev_ms=stddev_ms(grep_rust),
+        grep_ms=grep["mean"] * 1000,
+        grep_stddev_ms=stddev_ms(grep),
     )
-    parser.add_argument(
-        "-o",
-        "--output-file",
-        type=Path,
-        default=Path("bench/benchmark.svg"),
-        help="output SVG chart path",
-    )
-    return parser.parse_args()
+
+
+def stddev_ms(result: dict[str, float | None]) -> float:
+    stddev = result.get("stddev")
+    return 0.0 if stddev is None else stddev * 1000
+
+
+def write_benchmark_json(json_file: Path, results: list[BenchmarkResult]) -> None:
+    payload = {
+        "title": "grep-rust vs grep",
+        "cases": [
+            {
+                "dataset_label": result.case.dataset_label,
+                "case_label": result.case.case_label,
+                "chart_label": result.case.chart_label,
+                "pattern": result.case.pattern,
+                "input_file": str(result.case.input_file),
+                "series": {
+                    "grep-rust": {
+                        "mean_ms": result.grep_rust_ms,
+                        "stddev_ms": result.grep_rust_stddev_ms,
+                    },
+                    "grep baseline": {
+                        "mean_ms": result.grep_ms,
+                        "stddev_ms": result.grep_stddev_ms,
+                    },
+                },
+            }
+            for result in results
+        ],
+    }
+    json_file.write_text(json.dumps(payload, indent=2) + "\n")
 
 
 def main() -> None:
@@ -57,47 +177,18 @@ def main() -> None:
             "hyperfine is not installed\nmacOS: brew install hyperfine\nUbuntu/Debian: sudo apt install hyperfine"
         )
 
-    args = parse_args()
-    pattern = args.pattern
-    input_file = args.input_file
-    output_file = args.output_file
+    DEFAULT_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_JSON_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    if not input_file.is_file():
-        fail(
-            f"benchmark input not found: {input_file}\n"
-            f"generate one with: ./scripts/gen-bench-data.sh {input_file}"
-        )
-
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-
+    ensure_benchmark_inputs()
     subprocess.run(["cargo", "build", "--release"], check=True)
 
-    grep_rust_cmd = build_command("target/release/grep-rust", pattern, str(input_file))
-    grep_cmd = build_command("grep", pattern, str(input_file))
+    results = [run_case(case) for case in benchmark_cases()]
+    write_benchmark_json(DEFAULT_JSON_FILE, results)
+    render_plot_from_json(DEFAULT_JSON_FILE, DEFAULT_OUTPUT_FILE)
 
-    with tempfile.NamedTemporaryFile(suffix=".json") as temp:
-        subprocess.run(
-            [
-                "hyperfine",
-                "--warmup",
-                "2",
-                "--shell",
-                "bash",
-                "--export-json",
-                temp.name,
-                grep_rust_cmd,
-                grep_cmd,
-            ],
-            check=True,
-        )
-        results = json.loads(Path(temp.name).read_text())
-
-    means_ms = [result["mean"] * 1000 for result in results["results"]]
-    stddev_ms = [result["stddev"] * 1000 for result in results["results"]]
-
-    write_svg_plot(output_file, benchmark_labels(), means_ms, stddev_ms)
-
-    print(f"Wrote benchmark plot to {output_file}")
+    print(f"Wrote benchmark data to {DEFAULT_JSON_FILE}")
+    print(f"Wrote benchmark plot to {DEFAULT_OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
