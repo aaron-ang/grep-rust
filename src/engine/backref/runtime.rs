@@ -14,7 +14,7 @@ struct BackreferencePlan {
     start_anchor: bool,
     end_anchor: bool,
     search_hints: SearchHints,
-    fast_path: Option<SingleCaptureLiteralBackref>,
+    fast_path: Option<FastPath>,
 }
 
 #[derive(Debug)]
@@ -25,8 +25,22 @@ struct SearchHints {
 }
 
 #[derive(Debug)]
+enum FastPath {
+    SingleCaptureLiteralBackref(SingleCaptureLiteralBackref),
+    TwoPartReplayBackref(TwoPartReplayBackref),
+}
+
+#[derive(Debug)]
 struct SingleCaptureLiteralBackref {
     matcher: RepeatedAtomMatcher,
+    separator: String,
+}
+
+#[derive(Debug)]
+struct TwoPartReplayBackref {
+    first_matcher: RepeatedAtomMatcher,
+    middle_separator: String,
+    second_matcher: RepeatedAtomMatcher,
     separator: String,
 }
 
@@ -173,6 +187,10 @@ impl RepeatedAtomMatcher {
         }
     }
 
+    fn byte_len_for_count(&self, count: usize) -> usize {
+        self.unit_byte_width() * count
+    }
+
     fn matches_entire(&self, input: &str) -> bool {
         let mut current = 0;
         let mut count = 0;
@@ -294,32 +312,35 @@ impl BackreferencePlan {
 
     fn find_fast_path_match(&self, input: &str, scan_start: usize) -> Option<RegexMatch> {
         let fast_path = self.fast_path.as_ref()?;
-        self.find_single_capture_literal_backref(
-            input,
-            scan_start,
-            &fast_path.matcher,
-            &fast_path.separator,
-        )
+        match fast_path {
+            FastPath::SingleCaptureLiteralBackref(fast_path) => {
+                self.find_single_capture_literal_backref(input, scan_start, &fast_path)
+            }
+            FastPath::TwoPartReplayBackref(fast_path) => {
+                self.find_two_part_replay_backref(input, scan_start, fast_path)
+            }
+        }
     }
 
     fn find_single_capture_literal_backref(
         &self,
         input: &str,
         scan_start: usize,
-        matcher: &RepeatedAtomMatcher,
-        separator: &str,
+        fast_path: &SingleCaptureLiteralBackref,
     ) -> Option<RegexMatch> {
         let mut search_from = scan_start;
 
-        while let Some(separator_start) = find_literal_from(input, search_from, separator) {
-            let separator_end = separator_start + separator.len();
+        while let Some(separator_start) =
+            find_literal_from(input, search_from, &fast_path.separator)
+        {
+            let separator_end = separator_start + fast_path.separator.len();
 
             if let Some(found) = self.match_single_capture_literal_backref_at(
                 input,
                 scan_start,
                 separator_start,
                 separator_end,
-                matcher,
+                &fast_path.matcher,
             ) {
                 return Some(found);
             }
@@ -373,6 +394,111 @@ impl BackreferencePlan {
             let capture = input.get(start..separator_start)?;
             if input.get(separator_end..end) == Some(capture) {
                 let found = RegexMatch { start, end };
+                if !self.end_anchor || found.end == input.len() {
+                    return Some(found);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn find_two_part_replay_backref(
+        &self,
+        input: &str,
+        scan_start: usize,
+        fast_path: &TwoPartReplayBackref,
+    ) -> Option<RegexMatch> {
+        let mut search_from = scan_start;
+
+        while let Some(separator_start) =
+            find_literal_from(input, search_from, &fast_path.separator)
+        {
+            let separator_end = separator_start + fast_path.separator.len();
+
+            if let Some(found) = self.match_two_part_replay_backref_at(
+                input,
+                scan_start,
+                separator_start,
+                separator_end,
+                fast_path,
+            ) {
+                return Some(found);
+            }
+
+            let Some(next) = next_char_boundary(input, separator_start) else {
+                break;
+            };
+            search_from = next;
+        }
+
+        None
+    }
+
+    fn match_two_part_replay_backref_at(
+        &self,
+        input: &str,
+        scan_start: usize,
+        separator_start: usize,
+        separator_end: usize,
+        fast_path: &TwoPartReplayBackref,
+    ) -> Option<RegexMatch> {
+        let second_available =
+            fast_path
+                .second_matcher
+                .count_backward(input, scan_start, separator_start);
+        let second_upper = fast_path
+            .second_matcher
+            .max
+            .unwrap_or(second_available)
+            .min(second_available);
+
+        if second_upper < fast_path.second_matcher.min {
+            return None;
+        }
+
+        for second_count in (fast_path.second_matcher.min..=second_upper).rev() {
+            let second_byte_len = fast_path.second_matcher.byte_len_for_count(second_count);
+            let Some(second_start) = separator_start.checked_sub(second_byte_len) else {
+                continue;
+            };
+            let Some(first_end) = second_start.checked_sub(fast_path.middle_separator.len()) else {
+                continue;
+            };
+            if input.get(first_end..second_start) != Some(fast_path.middle_separator.as_str()) {
+                continue;
+            }
+
+            let first_available = fast_path
+                .first_matcher
+                .count_backward(input, scan_start, first_end);
+            let first_upper = fast_path
+                .first_matcher
+                .max
+                .unwrap_or(first_available)
+                .min(first_available);
+
+            if first_upper < fast_path.first_matcher.min {
+                continue;
+            }
+
+            for first_count in (fast_path.first_matcher.min..=first_upper).rev() {
+                let first_byte_len = fast_path.first_matcher.byte_len_for_count(first_count);
+                let Some(start) = first_end.checked_sub(first_byte_len) else {
+                    continue;
+                };
+                if start < scan_start || !input.is_char_boundary(start) {
+                    continue;
+                }
+
+                let Some(left_side) = input.get(start..separator_start) else {
+                    continue;
+                };
+                let Some(end) = separator_end.checked_add(left_side.len()) else {
+                    continue;
+                };
+                let found = (input.get(separator_end..end) == Some(left_side))
+                    .then_some(RegexMatch { start, end })?;
                 if !self.end_anchor || found.end == input.len() {
                     return Some(found);
                 }
@@ -946,7 +1072,56 @@ fn build_group_slots(referenced_groups: &[usize]) -> Vec<Option<usize>> {
     slots
 }
 
-fn detect_fast_path(patterns: &[Pattern]) -> Option<SingleCaptureLiteralBackref> {
+fn detect_fast_path(patterns: &[Pattern]) -> Option<FastPath> {
+    detect_single_capture_literal_backref(patterns)
+        .map(FastPath::SingleCaptureLiteralBackref)
+        .or_else(|| detect_two_part_replay_backref(patterns).map(FastPath::TwoPartReplayBackref))
+}
+
+fn detect_single_capture_literal_backref(
+    patterns: &[Pattern],
+) -> Option<SingleCaptureLiteralBackref> {
+    let (first, remaining) = patterns.split_first()?;
+    let capture_pattern = captured_single_pattern(first, 0)?;
+    let matcher = RepeatedAtomMatcher::from_pattern(capture_pattern)?;
+    let (separator, literal_count) = leading_literal_sequence(remaining)?;
+    let tail = &remaining[literal_count..];
+
+    if tail.len() == 1 && matches!(tail[0], Pattern::Backreference(1)) {
+        Some(SingleCaptureLiteralBackref { matcher, separator })
+    } else {
+        None
+    }
+}
+
+fn detect_two_part_replay_backref(patterns: &[Pattern]) -> Option<TwoPartReplayBackref> {
+    detect_direct_two_part_replay_backref(patterns)
+        .or_else(|| detect_group_replay_backref(patterns))
+}
+
+fn detect_direct_two_part_replay_backref(patterns: &[Pattern]) -> Option<TwoPartReplayBackref> {
+    let (first, remaining) = patterns.split_first()?;
+    let first_pattern = captured_single_pattern(first, 0)?;
+    let (middle_separator, middle_count) = leading_literal_sequence(remaining)?;
+    let remaining = &remaining[middle_count..];
+    let (second, remaining) = remaining.split_first()?;
+    let second_pattern = captured_single_pattern(second, 1)?;
+    let (separator, separator_count) = leading_literal_sequence(remaining)?;
+    let tail = &remaining[separator_count..];
+
+    if !matches_two_part_replay_tail(tail, &middle_separator) {
+        return None;
+    }
+
+    Some(TwoPartReplayBackref {
+        first_matcher: RepeatedAtomMatcher::from_pattern(first_pattern)?,
+        middle_separator,
+        second_matcher: RepeatedAtomMatcher::from_pattern(second_pattern)?,
+        separator,
+    })
+}
+
+fn detect_group_replay_backref(patterns: &[Pattern]) -> Option<TwoPartReplayBackref> {
     let (first, remaining) = patterns.split_first()?;
     let Pattern::CapturedGroup {
         idx,
@@ -961,18 +1136,70 @@ fn detect_fast_path(patterns: &[Pattern]) -> Option<SingleCaptureLiteralBackref>
         return None;
     }
 
-    let [capture_pattern] = inner.as_slice() else {
+    let (first_pattern, middle_separator, second_pattern) = extract_two_part_capture(inner, 1, 2)?;
+    let (separator, separator_count) = leading_literal_sequence(remaining)?;
+    let tail = &remaining[separator_count..];
+
+    if tail.len() != 1 || !matches!(tail[0], Pattern::Backreference(1)) {
+        return None;
+    }
+
+    Some(TwoPartReplayBackref {
+        first_matcher: RepeatedAtomMatcher::from_pattern(first_pattern)?,
+        middle_separator,
+        second_matcher: RepeatedAtomMatcher::from_pattern(second_pattern)?,
+        separator,
+    })
+}
+
+fn extract_two_part_capture(
+    patterns: &[Pattern],
+    first_idx: usize,
+    second_idx: usize,
+) -> Option<(&Pattern, String, &Pattern)> {
+    let (first, remaining) = patterns.split_first()?;
+    let first_pattern = captured_single_pattern(first, first_idx)?;
+    let (middle_separator, middle_count) = leading_literal_sequence(remaining)?;
+    let remaining = &remaining[middle_count..];
+    let (second, tail) = remaining.split_first()?;
+    let second_pattern = captured_single_pattern(second, second_idx)?;
+
+    tail.is_empty()
+        .then_some((first_pattern, middle_separator, second_pattern))
+}
+
+fn captured_single_pattern(pattern: &Pattern, expected_idx: usize) -> Option<&Pattern> {
+    let Pattern::CapturedGroup {
+        idx,
+        patterns,
+        count,
+    } = pattern
+    else {
         return None;
     };
-    let matcher = RepeatedAtomMatcher::from_pattern(capture_pattern)?;
-    let (separator, literal_count) = leading_literal_sequence(remaining)?;
-    let tail = &remaining[literal_count..];
 
-    if tail.len() == 1 && matches!(tail[0], Pattern::Backreference(1)) {
-        Some(SingleCaptureLiteralBackref { matcher, separator })
-    } else {
-        None
+    if *idx != expected_idx || !count.is_exactly_one() {
+        return None;
     }
+
+    let [single] = patterns.as_slice() else {
+        return None;
+    };
+
+    Some(single)
+}
+
+fn matches_two_part_replay_tail(patterns: &[Pattern], middle_separator: &str) -> bool {
+    let [Pattern::Backreference(1), rest @ ..] = patterns else {
+        return false;
+    };
+    let Some((literal, consumed)) = leading_literal_sequence(rest) else {
+        return false;
+    };
+
+    literal == middle_separator
+        && rest.len() == consumed + 1
+        && matches!(rest[consumed], Pattern::Backreference(2))
 }
 
 fn extract_anchor_literal(patterns: &[Pattern]) -> Option<AnchorLiteral> {

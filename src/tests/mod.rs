@@ -149,6 +149,24 @@ fn nested_backreferences_wildcard_alternation() {
 }
 
 #[test]
+fn two_part_replay_backreferences() {
+    assert_eq!(
+        first_match("token000-123 and token000-123", r"(\w+)-(\d+) and \1-\2"),
+        Some("token000-123 and token000-123".to_string())
+    );
+    assert!(first_match("token000-123 and token000-456", r"(\w+)-(\d+) and \1-\2").is_none());
+}
+
+#[test]
+fn grouped_replay_backreferences() {
+    assert_eq!(
+        first_match("token000-123 and token000-123", r"^((\w+)-(\d+)) and \1$"),
+        Some("token000-123 and token000-123".to_string())
+    );
+    assert!(first_match("token000-123 and token001-123", r"^((\w+)-(\d+)) and \1$").is_none());
+}
+
+#[test]
 fn literal_character_matching() {
     assert_eq!(first_match("dog", "d"), Some("d".to_string()));
     assert!(first_match("dog", "f").is_none());

@@ -85,19 +85,19 @@ uv pip install -r requirements.txt
 Generate all benchmark corpora:
 
 ```sh
-uv run scripts/gen-bench-data.sh
+uv run bench/gen-bench-data.sh
 ```
 
 Run the benchmark matrix and generate the SVG chart:
 
 ```sh
-uv run scripts/bench.py
+uv run bench/bench.py
 ```
 
 Re-render the chart from the saved benchmark JSON without rerunning `hyperfine`:
 
 ```sh
-uv run scripts/plot.py
+uv run bench/plot.py
 ```
 
 By default this benchmarks `grep-rust` against system `grep` across a fixed set of patterns:
@@ -119,14 +119,14 @@ By default this benchmarks `grep-rust` against system `grep` across a fixed set 
   - `^((\w+)-(\d+)) and \1$`
   - `^([abc]+)-\1$`
 
-`scripts/gen-bench-data.sh` generates all benchmark corpora, and `scripts/bench.py` will call it automatically if any benchmark input is missing. The benchmark data and chart are written to:
+`bench/gen-bench-data.sh` generates all benchmark corpora, and `bench/bench.py` will call it automatically if any benchmark input is missing. The corpora stay under `bench/`, while the benchmark data and chart are written to:
 
 ```text
-bench/benchmark.json
-bench/benchmark.svg
+assets/benchmark.json
+assets/benchmark.svg
 ```
 
-`scripts/bench.py` uses `hyperfine --warmup 3` and otherwise leaves hyperfine's run-count defaults in place.
+`bench/bench.py` uses `hyperfine --warmup 3` and otherwise leaves hyperfine's run-count defaults in place.
 
 The benchmark uses multiple corpora instead of a single file because each one stresses a different behavior:
 
@@ -139,7 +139,7 @@ The benchmark uses multiple corpora instead of a single file because each one st
 
 The generated chart shows the speedup of `grep-rust` over system `grep`. Values above `1.0x` mean `grep-rust` is faster.
 
-![Benchmark speedup comparison](bench/benchmark.svg)
+![Benchmark speedup comparison](assets/benchmark.svg)
 
 ## Optimization Notes
 

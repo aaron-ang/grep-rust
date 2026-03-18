@@ -32,9 +32,9 @@ class BenchmarkResult:
     grep_stddev_ms: float
 
 
-DEFAULT_OUTPUT_FILE = Path("bench/benchmark.svg")
-DEFAULT_JSON_FILE = Path("bench/benchmark.json")
-HYPERFINE_EXPORT_FILE = Path("bench/.hyperfine.json")
+DEFAULT_OUTPUT_FILE = Path("assets/benchmark.svg")
+DEFAULT_JSON_FILE = Path("assets/benchmark.json")
+HYPERFINE_EXPORT_FILE = Path("assets/.hyperfine.json")
 BENCH_DATA_FILE = Path("bench/data.txt")
 WORDS_DATA_FILE = Path("bench/words.txt")
 NEARMISS_DATA_FILE = Path("bench/nearmiss_small.txt")
@@ -135,7 +135,7 @@ def ensure_benchmark_inputs() -> None:
     ):
         return
 
-    subprocess.run(["./scripts/gen-bench-data.sh"], check=True)
+    subprocess.run(["./bench/gen-bench-data.sh"], check=True)
 
 
 def build_command(binary: str, pattern: str, input_file: Path) -> str:

@@ -9,12 +9,12 @@
       "input_file": "bench/data.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 31.869165616363638,
-          "stddev_ms": 27.69347460428473
+          "mean_ms": 27.762998833975892,
+          "stddev_ms": 4.668787007764646
         },
         "grep baseline": {
-          "mean_ms": 81.73646009935487,
-          "stddev_ms": 4.212268997926509
+          "mean_ms": 77.97159271837839,
+          "stddev_ms": 6.622694558874155
         }
       }
     },
@@ -26,12 +26,12 @@
       "input_file": "bench/data.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 30.549720678113207,
-          "stddev_ms": 17.981590202580453
+          "mean_ms": 27.5454989069565,
+          "stddev_ms": 13.218139997429722
         },
         "grep baseline": {
-          "mean_ms": 145.9084947419048,
-          "stddev_ms": 22.589363416822724
+          "mean_ms": 134.54605918363637,
+          "stddev_ms": 20.864681156385014
         }
       }
     },
@@ -43,12 +43,12 @@
       "input_file": "bench/data.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 45.56167077666668,
-          "stddev_ms": 1.587745112025644
+          "mean_ms": 48.10893753548388,
+          "stddev_ms": 8.729064675499313
         },
         "grep baseline": {
-          "mean_ms": 113.02651989076922,
-          "stddev_ms": 31.059980700652126
+          "mean_ms": 122.72744341481483,
+          "stddev_ms": 29.66349510888279
         }
       }
     },
@@ -60,12 +60,12 @@
       "input_file": "bench/words.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 14.62094169818182,
-          "stddev_ms": 5.770515569350709
+          "mean_ms": 13.128492213333331,
+          "stddev_ms": 7.0721643007315205
         },
         "grep baseline": {
-          "mean_ms": 24.876398888928566,
-          "stddev_ms": 5.890883018416122
+          "mean_ms": 24.810823049811322,
+          "stddev_ms": 17.398892883780334
         }
       }
     },
@@ -77,12 +77,12 @@
       "input_file": "bench/words.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 12.603297358095226,
-          "stddev_ms": 9.314143872493966
+          "mean_ms": 16.26851777643154,
+          "stddev_ms": 14.689160360881448
         },
         "grep baseline": {
-          "mean_ms": 27.64513683568626,
-          "stddev_ms": 1.5864802401370004
+          "mean_ms": 27.03208230095239,
+          "stddev_ms": 3.3440711837505988
         }
       }
     },
@@ -94,12 +94,12 @@
       "input_file": "bench/words.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 18.52468646979591,
-          "stddev_ms": 7.850738033624155
+          "mean_ms": 16.397883679999996,
+          "stddev_ms": 1.6847842993576547
         },
         "grep baseline": {
-          "mean_ms": 86.29561275777776,
-          "stddev_ms": 11.804803521517064
+          "mean_ms": 104.59380880121216,
+          "stddev_ms": 55.137347717289494
         }
       }
     },
@@ -111,12 +111,12 @@
       "input_file": "bench/nearmiss_small.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 3.097681370000005,
-          "stddev_ms": 1.6834731860954124
+          "mean_ms": 3.35807699420195,
+          "stddev_ms": 3.912423640416645
         },
         "grep baseline": {
-          "mean_ms": 5.7228762117431184,
-          "stddev_ms": 4.673174370483821
+          "mean_ms": 5.562770898864637,
+          "stddev_ms": 4.889933652396773
         }
       }
     },
@@ -128,12 +128,12 @@
       "input_file": "bench/backref.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 10.42049560506024,
-          "stddev_ms": 1.2998688035531905
+          "mean_ms": 14.47662227634704,
+          "stddev_ms": 11.898454409215466
         },
         "grep baseline": {
-          "mean_ms": 189.5874094066667,
-          "stddev_ms": 16.53851502274007
+          "mean_ms": 194.54847407999995,
+          "stddev_ms": 18.90328282869862
         }
       }
     },
@@ -145,12 +145,12 @@
       "input_file": "bench/backref.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 11.282982679821432,
-          "stddev_ms": 0.6132116581519139
+          "mean_ms": 14.962397862068958,
+          "stddev_ms": 5.2055124445186856
         },
         "grep baseline": {
-          "mean_ms": 34.967869000487816,
-          "stddev_ms": 5.95236426797408
+          "mean_ms": 52.99640486585366,
+          "stddev_ms": 30.681517378311504
         }
       }
     },
@@ -162,12 +162,12 @@
       "input_file": "bench/backref.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 803.0318917000001,
-          "stddev_ms": 22.56165827809681
+          "mean_ms": 6.09597447770834,
+          "stddev_ms": 3.3132124174349364
         },
         "grep baseline": {
-          "mean_ms": 175.08277353333332,
-          "stddev_ms": 7.896077964121706
+          "mean_ms": 203.22010709750003,
+          "stddev_ms": 61.132181587959934
         }
       }
     },
@@ -179,12 +179,12 @@
       "input_file": "bench/backref.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 57.80088246000002,
-          "stddev_ms": 5.352565127062125
+          "mean_ms": 14.402444059322038,
+          "stddev_ms": 30.01678980110599
         },
         "grep baseline": {
-          "mean_ms": 36.163064421298714,
-          "stddev_ms": 1.122312108733539
+          "mean_ms": 44.05754137837839,
+          "stddev_ms": 16.206784085166966
         }
       }
     },
@@ -196,12 +196,12 @@
       "input_file": "bench/backref.txt",
       "series": {
         "grep-rust": {
-          "mean_ms": 9.51484737343284,
-          "stddev_ms": 1.46951336176903
+          "mean_ms": 12.291732254973265,
+          "stddev_ms": 10.672057797940855
         },
         "grep baseline": {
-          "mean_ms": 27.3614552153398,
-          "stddev_ms": 2.197605076950529
+          "mean_ms": 36.64083292888889,
+          "stddev_ms": 17.821849027522585
         }
       }
     }

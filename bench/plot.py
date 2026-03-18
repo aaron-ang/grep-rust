@@ -11,8 +11,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-DEFAULT_INPUT_JSON = Path("bench/benchmark.json")
-DEFAULT_OUTPUT_FILE = Path("bench/benchmark.svg")
+DEFAULT_INPUT_JSON = Path("assets/benchmark.json")
+DEFAULT_OUTPUT_FILE = Path("assets/benchmark.svg")
 
 
 @dataclass(frozen=True)
