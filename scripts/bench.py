@@ -96,6 +96,30 @@ def benchmark_cases() -> list[BenchmarkCase]:
             pattern=r"(\w+) and \1",
             input_file=BACKREF_DATA_FILE,
         ),
+        BenchmarkCase(
+            dataset_label="Backreference corpus",
+            case_label="anchored repeat",
+            pattern=r"^(\w+) and \1$",
+            input_file=BACKREF_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Backreference corpus",
+            case_label="multiple backrefs",
+            pattern=r"(\w+)-(\d+) and \1-\2",
+            input_file=BACKREF_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Backreference corpus",
+            case_label="group replay",
+            pattern=r"^((\w+)-(\d+)) and \1$",
+            input_file=BACKREF_DATA_FILE,
+        ),
+        BenchmarkCase(
+            dataset_label="Backreference corpus",
+            case_label="quantified capture",
+            pattern=r"^([abc]+)-\1$",
+            input_file=BACKREF_DATA_FILE,
+        ),
     ]
 
 

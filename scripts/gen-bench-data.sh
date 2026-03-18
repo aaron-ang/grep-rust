@@ -72,11 +72,26 @@ generate_backref() {
   : > "$out_file"
 
   for i in $(seq 1 "$line_count"); do
-    if (( i % 4 == 0 )); then
-      printf 'token%06d and token%06d\n' "$i" "$i" >> "$out_file"
-    else
-      printf 'token%06d and other%06d\n' "$i" "$i" >> "$out_file"
-    fi
+    case $(( i % 6 )) in
+      0)
+        printf 'token%06d and token%06d\n' "$i" "$i" >> "$out_file"
+        ;;
+      1)
+        printf 'token%06d and other%06d\n' "$i" "$i" >> "$out_file"
+        ;;
+      2)
+        printf 'token%06d-%06d and token%06d-%06d\n' "$i" "$i" "$i" "$i" >> "$out_file"
+        ;;
+      3)
+        printf 'token%06d-%06d and token%06d-%06d\n' "$i" "$i" "$i" "$((i + 1))" >> "$out_file"
+        ;;
+      4)
+        printf 'abca-abca\n' >> "$out_file"
+        ;;
+      5)
+        printf 'abca-abcb\n' >> "$out_file"
+        ;;
+    esac
   done
 
   printf 'wrote %s lines to %s\n' "$line_count" "$out_file"
