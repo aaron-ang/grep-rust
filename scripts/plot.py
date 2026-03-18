@@ -55,7 +55,7 @@ def write_svg_plot(
         axis.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + max_speedup * 0.03,
-            f"{speedup:.2f}x",
+            f"{speedup:.2f}",
             ha="center",
             va="bottom",
         )
