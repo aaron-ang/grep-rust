@@ -1,6 +1,6 @@
 # grep-rust
 
-A small `grep` implementation in Rust with a custom regex engine, recursive file search, only-match output, ANSI highlighting, and a benchmark workflow against system `grep`.
+A small `grep` implementation in Rust with a custom regex engine, recursive file search, only-match output, ANSI highlighting, and a benchmark workflow against `grep`, `ripgrep`, and `fastgrep`.
 
 [![progress-banner](https://backend.codecrafters.io/progress/grep/d5fac5b9-9540-466c-9d43-83878a8eefe6)](https://app.codecrafters.io/users/aaron-ang)
 
@@ -10,6 +10,7 @@ A small `grep` implementation in Rust with a custom regex engine, recursive file
 
 - Search stdin or one or more files
 - Recursive directory traversal with `-r`
+- Parallel file search with `-j, --threads`
 - Print only matched text with `-o`
 - Highlight matches with `--color=always|auto|never`
 - Exit with code `0` when at least one match is found, `1` otherwise
@@ -45,6 +46,12 @@ Recursive search:
 cargo run -- -r -E 'hello\d+' src
 ```
 
+Recursive search with four worker threads:
+
+```sh
+cargo run -- -r -j 4 -E 'hello\d+' src
+```
+
 Only matching output:
 
 ```sh
@@ -69,11 +76,14 @@ cargo test
 
 ## Benchmarking
 
-Install `hyperfine` locally:
+Install the external CLI benchmarking tools:
 
 ```sh
-brew install hyperfine
+brew install hyperfine ripgrep
+cargo install cargo-flamegraph
 ```
+
+`fastgrep` is also expected on `PATH`. If your local install exposes it under a different binary name, set `FASTGREP_BIN=/path/to/that/binary` when running the benchmark script.
 
 Create the Python virtual environment and install plotting dependencies:
 
@@ -85,61 +95,91 @@ uv pip install -r requirements.txt
 Generate all benchmark corpora:
 
 ```sh
-uv run bench/gen-bench-data.sh
+uv run scripts/gen-bench-data.sh
 ```
 
-Run the benchmark matrix and generate the SVG chart:
+Run the external CLI benchmark matrix and generate the SVG chart:
 
 ```sh
-uv run bench/bench.py
+uv run python scripts/bench.py
 ```
 
 Re-render the chart from the saved benchmark JSON without rerunning `hyperfine`:
 
 ```sh
-uv run bench/plot.py
+uv run python scripts/plot.py
 ```
 
-By default this benchmarks `grep-rust` against system `grep` across a fixed set of patterns:
+Run the Rust-native Criterion benches:
 
-- `bench/data.txt`
+```sh
+cargo bench
+```
+
+Generate a flamegraph for a deterministic workload:
+
+```sh
+cargo flamegraph --root --output assets/flamegraphs/literal_prefix.svg --bin profile_workload -- --case literal-prefix
+```
+
+By default the external matrix benchmarks `grep-rust`, system `grep`, `rg`, and `fastgrep` across a fixed set of patterns:
+
+- `fixtures/bench/data.txt`
   - `matched_line_[0123456789]+`
   - `^log=[0123456789]+ level=INFO`
   - `message=(matched_line|ordinary_line)_[0123456789]+`
-- `bench/words.txt`
+- `fixtures/bench/words.txt`
   - `cat dog bird`
   - `^(cat dog bird|dog bird cat)$`
   - `^.+ .+ .+$`
-- `bench/nearmiss_small.txt`
+- `fixtures/bench/nearmiss_small.txt`
   - `a+a+a+a+b`
-- `bench/backref.txt`
+- `fixtures/bench/tree/`
+  - `matched_line_[0123456789]+` with recursive `-r`
+- `fixtures/bench/backref.txt`
   - `(\w+) and \1`
   - `^(\w+) and \1$`
   - `(\w+)-(\d+) and \1-\2`
   - `^((\w+)-(\d+)) and \1$`
   - `^([abc]+)-\1$`
 
-`bench/gen-bench-data.sh` generates all benchmark corpora, and `bench/bench.py` will call it automatically if any benchmark input is missing. The corpora stay under `bench/`, while the benchmark data and chart are written to:
+The benchmark layout is:
 
 ```text
-assets/benchmark.json
-assets/benchmark.svg
+scripts/
+  bench.py
+  plot.py
+  gen-bench-data.sh
+
+fixtures/bench/
+  data.txt
+  words.txt
+  nearmiss_small.txt
+  backref.txt
+  tree/
+
+assets/bench/
+  benchmark.json
+  benchmark.svg
+
+assets/flamegraphs/
 ```
 
-`bench/bench.py` uses `hyperfine --warmup 3` and otherwise leaves hyperfine's run-count defaults in place.
+`scripts/gen-bench-data.sh` generates all benchmark corpora, and `scripts/bench.py` will call it automatically if any benchmark input is missing. `scripts/bench.py` uses `hyperfine --warmup 3` and otherwise leaves hyperfine's run-count defaults in place.
 
 The benchmark uses multiple corpora instead of a single file because each one stresses a different behavior:
 
-- `bench/data.txt` covers literal prefixes, anchors, and alternation on structured log lines
-- `bench/words.txt` covers simple literal and broad wildcard scans on short repeated phrases
-- `bench/nearmiss_small.txt` stresses quantified near-miss backtracking
-- `bench/backref.txt` exercises single, multiple, grouped, and quantified backreference paths in the custom fallback engine
+- `fixtures/bench/data.txt` covers literal prefixes, anchors, and alternation on structured log lines
+- `fixtures/bench/words.txt` covers simple literal and broad wildcard scans on short repeated phrases
+- `fixtures/bench/nearmiss_small.txt` stresses quantified near-miss backtracking
+- `fixtures/bench/tree/` measures recursive multi-file throughput, which is where `-j` parallelism matters most
+- `fixtures/bench/backref.txt` exercises single, multiple, grouped, and quantified backreference paths in the custom fallback engine
 
 ## Benchmark Chart
 
-The generated chart shows the speedup of `grep-rust` over system `grep`. Values above `1.0x` mean `grep-rust` is faster.
+The generated chart in `assets/bench/benchmark.svg` shows the speedup of `grep-rust` over system `grep`. Values above `1.0x` mean `grep-rust` is faster. The JSON matrix in `assets/bench/benchmark.json` also records the raw timings for `rg` and `fastgrep`.
 
-![Benchmark speedup comparison](assets/benchmark.svg)
+![Benchmark speedup comparison](assets/bench/benchmark.svg)
 
 ## Optimization Notes
 
@@ -149,6 +189,7 @@ The current implementation is competitive with system `grep` mainly because it u
 - Regular regexes are compiled with `regex-automata`
 - Backreference patterns fall back to the custom matcher instead of slowing down the normal path
 - Searches return byte spans directly, so `-o` and highlighting reuse the same match data
+- Recursive and multi-file search fan out across worker threads while preserving input file order in the final output
 - Output stays buffered, which keeps printing overhead from dominating the benchmark
 
 ### Backreference Path

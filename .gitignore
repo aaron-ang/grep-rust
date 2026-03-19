@@ -12,4 +12,5 @@ target/
 __pycache__/
 .venv/
 
-bench/*.txt
+fixtures/bench/**/*.txt
+assets/flamegraphs/

@@ -1,0 +1,403 @@
+{
+  "title": "grep-rust external benchmark matrix",
+  "cases": [
+    {
+      "dataset_label": "Log corpus",
+      "case_label": "literal prefix",
+      "chart_label": "literal prefix",
+      "pattern": "matched_line_[0123456789]+",
+      "input_file": "fixtures/bench/data.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 52.71766880333336,
+          "stddev_ms": 69.17358939119383
+        },
+        "grep baseline": {
+          "mean_ms": 122.64391797238096,
+          "stddev_ms": 3.2796203194699918
+        },
+        "ripgrep": {
+          "mean_ms": 9.801633945000003,
+          "stddev_ms": 5.496826627419422
+        },
+        "fastgrep": {
+          "mean_ms": 6.900791487479678,
+          "stddev_ms": 0.8311644673701709
+        }
+      },
+      "unsupported_tools": [],
+      "speedups": {
+        "over_grep": 2.326429084524051,
+        "over_ripgrep": 0.18592692293670318,
+        "over_fastgrep": 0.130900922672122
+      }
+    },
+    {
+      "dataset_label": "Log corpus",
+      "case_label": "anchored prefix",
+      "chart_label": "anchored prefix",
+      "pattern": "^log=[0123456789]+ level=INFO",
+      "input_file": "fixtures/bench/data.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 37.56400382,
+          "stddev_ms": 0.5278960496680739
+        },
+        "grep baseline": {
+          "mean_ms": 201.65459003428572,
+          "stddev_ms": 2.513607281520675
+        },
+        "ripgrep": {
+          "mean_ms": 20.942686490940165,
+          "stddev_ms": 1.30459414879688
+        },
+        "fastgrep": {
+          "mean_ms": 21.948100944999993,
+          "stddev_ms": 25.66675191340453
+        }
+      },
+      "unsupported_tools": [],
+      "speedups": {
+        "over_grep": 5.368293300165193,
+        "over_ripgrep": 0.5575200820257015,
+        "over_fastgrep": 0.5842854518429764
+      }
+    },
+    {
+      "dataset_label": "Log corpus",
+      "case_label": "dense alternation",
+      "chart_label": "dense alternation",
+      "pattern": "message=(matched_line|ordinary_line)_[0123456789]+",
+      "input_file": "fixtures/bench/data.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 158.9355895152941,
+          "stddev_ms": 106.82920854516838
+        },
+        "grep baseline": {
+          "mean_ms": 396.2909756646154,
+          "stddev_ms": 179.49480100744626
+        },
+        "ripgrep": {
+          "mean_ms": 128.83982830941176,
+          "stddev_ms": 163.79107839483083
+        },
+        "fastgrep": {
+          "mean_ms": 20.713376626938786,
+          "stddev_ms": 1.7304031202043562
+        }
+      },
+      "unsupported_tools": [],
+      "speedups": {
+        "over_grep": 2.4934061456794168,
+        "over_ripgrep": 0.8106417744592926,
+        "over_fastgrep": 0.13032560353605113
+      }
+    },
+    {
+      "dataset_label": "Word corpus",
+      "case_label": "literal phrase",
+      "chart_label": "literal phrase",
+      "pattern": "cat dog bird",
+      "input_file": "fixtures/bench/words.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 9.964488825971564,
+          "stddev_ms": 0.42604738126023434
+        },
+        "grep baseline": {
+          "mean_ms": 35.96504777113925,
+          "stddev_ms": 14.029663343457445
+        },
+        "ripgrep": {
+          "mean_ms": 6.379650760936456,
+          "stddev_ms": 0.41729791271742167
+        },
+        "fastgrep": {
+          "mean_ms": 4.5701507979347875,
+          "stddev_ms": 0.6726878322359242
+        }
+      },
+      "unsupported_tools": [],
+      "speedups": {
+        "over_grep": 3.6093219029359047,
+        "over_ripgrep": 0.6402386386653831,
+        "over_fastgrep": 0.4586437776941544
+      }
+    },
+    {
+      "dataset_label": "Word corpus",
+      "case_label": "anchored alternation",
+      "chart_label": "anchored alternation",
+      "pattern": "^(cat dog bird|dog bird cat)$",
+      "input_file": "fixtures/bench/words.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 13.788987096666668,
+          "stddev_ms": 0.6039728666942972
+        },
+        "grep baseline": {
+          "mean_ms": 39.830793580000005,
+          "stddev_ms": 1.3057891644507316
+        },
+        "ripgrep": {
+          "mean_ms": 12.010322884225356,
+          "stddev_ms": 1.8029241135852772
+        },
+        "fastgrep": {
+          "mean_ms": 8.31387342723247,
+          "stddev_ms": 0.9241052124230759
+        }
+      },
+      "unsupported_tools": [],
+      "speedups": {
+        "over_grep": 2.888594593697796,
+        "over_ripgrep": 0.8710083489111914,
+        "over_fastgrep": 0.6029357609046031
+      }
+    },
+    {
+      "dataset_label": "Word corpus",
+      "case_label": "broad wildcard",
+      "chart_label": "broad wildcard",
+      "pattern": "^.+ .+ .+$",
+      "input_file": "fixtures/bench/words.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 18.704286584496113,
+          "stddev_ms": 0.4407023646710333
+        },
+        "grep baseline": {
+          "mean_ms": 131.60142396363636,
+          "stddev_ms": 1.8109223624473663
+        },
+        "ripgrep": {
+          "mean_ms": 15.583170947058823,
+          "stddev_ms": 8.943068949503212
+        },
+        "fastgrep": {
+          "mean_ms": 10.127599556175296,
+          "stddev_ms": 5.058611369847113
+        }
+      },
+      "unsupported_tools": [],
+      "speedups": {
+        "over_grep": 7.035896470529922,
+        "over_ripgrep": 0.8331336710792078,
+        "over_fastgrep": 0.5414587458561511
+      }
+    },
+    {
+      "dataset_label": "Near-miss corpus",
+      "case_label": "quantified backtracking",
+      "chart_label": "quantified backtracking",
+      "pattern": "a+a+a+a+b",
+      "input_file": "fixtures/bench/nearmiss_small.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 3.999690349195403,
+          "stddev_ms": 0.5175618079802511
+        },
+        "grep baseline": {
+          "mean_ms": 6.917099539999998,
+          "stddev_ms": 0.4059108288758525
+        },
+        "ripgrep": {
+          "mean_ms": 4.704517217915631,
+          "stddev_ms": 0.745922346014348
+        },
+        "fastgrep": {
+          "mean_ms": 4.331567687152618,
+          "stddev_ms": 4.216043477531394
+        }
+      },
+      "unsupported_tools": [],
+      "speedups": {
+        "over_grep": 1.7294087632037503,
+        "over_ripgrep": 1.176220358874035,
+        "over_fastgrep": 1.0829757578668502
+      }
+    },
+    {
+      "dataset_label": "Directory corpus",
+      "case_label": "recursive literal prefix",
+      "chart_label": "recursive literal prefix",
+      "pattern": "matched_line_[0123456789]+",
+      "input_file": "fixtures/bench/tree",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 7.700328142382671,
+          "stddev_ms": 0.5124339621577607
+        },
+        "grep baseline": {
+          "mean_ms": 84.83696754352941,
+          "stddev_ms": 1.0182354533402078
+        },
+        "ripgrep": {
+          "mean_ms": 9.35957883808118,
+          "stddev_ms": 1.7605813164436699
+        },
+        "fastgrep": {
+          "mean_ms": 9.728080123669727,
+          "stddev_ms": 0.983531716345555
+        }
+      },
+      "unsupported_tools": [],
+      "speedups": {
+        "over_grep": 11.017318479791275,
+        "over_ripgrep": 1.2154779205532786,
+        "over_fastgrep": 1.2633331909748484
+      }
+    },
+    {
+      "dataset_label": "Backreference corpus",
+      "case_label": "word repeat",
+      "chart_label": "word repeat",
+      "pattern": "(\\w+) and \\1",
+      "input_file": "fixtures/bench/backref.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 15.39234961251534,
+          "stddev_ms": 3.7364958079802477
+        },
+        "grep baseline": {
+          "mean_ms": 285.54541588000006,
+          "stddev_ms": 1.7164705878306707
+        },
+        "ripgrep": {
+          "mean_ms": 16.25207698065359,
+          "stddev_ms": 0.6306329003187997
+        },
+        "fastgrep": null
+      },
+      "unsupported_tools": [
+        "fastgrep"
+      ],
+      "speedups": {
+        "over_grep": 18.55112592088127,
+        "over_ripgrep": 1.0558541996368909,
+        "over_fastgrep": null
+      }
+    },
+    {
+      "dataset_label": "Backreference corpus",
+      "case_label": "anchored repeat",
+      "chart_label": "anchored repeat",
+      "pattern": "^(\\w+) and \\1$",
+      "input_file": "fixtures/bench/backref.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 14.77231027530865,
+          "stddev_ms": 0.7607823251841458
+        },
+        "grep baseline": {
+          "mean_ms": 71.09746945384616,
+          "stddev_ms": 97.13054979279839
+        },
+        "ripgrep": {
+          "mean_ms": 8.142069176865666,
+          "stddev_ms": 0.5830487132765446
+        },
+        "fastgrep": null
+      },
+      "unsupported_tools": [
+        "fastgrep"
+      ],
+      "speedups": {
+        "over_grep": 4.812887634284452,
+        "over_ripgrep": 0.5511710101618176,
+        "over_fastgrep": null
+      }
+    },
+    {
+      "dataset_label": "Backreference corpus",
+      "case_label": "multiple backrefs",
+      "chart_label": "multiple backrefs",
+      "pattern": "(\\w+)-(\\d+) and \\1-\\2",
+      "input_file": "fixtures/bench/backref.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 13.895812055959608,
+          "stddev_ms": 8.503441896198451
+        },
+        "grep baseline": {
+          "mean_ms": 316.82057709636365,
+          "stddev_ms": 113.43615247225948
+        },
+        "ripgrep": {
+          "mean_ms": 16.042840049403978,
+          "stddev_ms": 3.366575018430355
+        },
+        "fastgrep": null
+      },
+      "unsupported_tools": [
+        "fastgrep"
+      ],
+      "speedups": {
+        "over_grep": 22.799716621130198,
+        "over_ripgrep": 1.154508997732418,
+        "over_fastgrep": null
+      }
+    },
+    {
+      "dataset_label": "Backreference corpus",
+      "case_label": "group replay",
+      "chart_label": "group replay",
+      "pattern": "^((\\w+)-(\\d+)) and \\1$",
+      "input_file": "fixtures/bench/backref.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 13.357003022111806,
+          "stddev_ms": 1.2049450227489409
+        },
+        "grep baseline": {
+          "mean_ms": 61.34048955574468,
+          "stddev_ms": 14.834218718388021
+        },
+        "ripgrep": {
+          "mean_ms": 9.45477226522088,
+          "stddev_ms": 5.821803913541113
+        },
+        "fastgrep": null
+      },
+      "unsupported_tools": [
+        "fastgrep"
+      ],
+      "speedups": {
+        "over_grep": 4.592384193834408,
+        "over_ripgrep": 0.7078513233521778,
+        "over_fastgrep": null
+      }
+    },
+    {
+      "dataset_label": "Backreference corpus",
+      "case_label": "quantified capture",
+      "chart_label": "quantified capture",
+      "pattern": "^([abc]+)-\\1$",
+      "input_file": "fixtures/bench/backref.txt",
+      "series": {
+        "grep-rust": {
+          "mean_ms": 11.259412502304153,
+          "stddev_ms": 0.8974697307608978
+        },
+        "grep baseline": {
+          "mean_ms": 43.44396025757574,
+          "stddev_ms": 4.459127312196514
+        },
+        "ripgrep": {
+          "mean_ms": 7.686136351063834,
+          "stddev_ms": 0.6265337143075393
+        },
+        "fastgrep": null
+      },
+      "unsupported_tools": [
+        "fastgrep"
+      ],
+      "speedups": {
+        "over_grep": 3.8584571129874905,
+        "over_ripgrep": 0.6826409770039888,
+        "over_fastgrep": null
+      }
+    }
+  ]
+}
