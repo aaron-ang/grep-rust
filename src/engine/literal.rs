@@ -1,6 +1,6 @@
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 
-use super::{classify::LiteralSpec, RegexMatch};
+use super::{classify::LiteralSpec, LineCandidate, RegexMatch};
 
 pub(crate) struct LiteralSearch {
     literals: Vec<String>,
@@ -65,6 +65,19 @@ impl LiteralSearch {
                 end: matched.end(),
             })
             .collect()
+    }
+
+    pub(crate) fn find_candidate_line(&self, input: &str, at: usize) -> Option<LineCandidate> {
+        let offset = self.automaton.find(input.get(at..)?)?.start() + at;
+        if self.start_anchor || self.end_anchor {
+            Some(LineCandidate::Candidate(offset))
+        } else {
+            Some(LineCandidate::Confirmed(offset))
+        }
+    }
+
+    pub(crate) fn supports_candidate_lines(&self) -> bool {
+        true
     }
 }
 

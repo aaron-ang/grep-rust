@@ -14,6 +14,13 @@ pub struct RegexMatch {
     pub end: usize,
 }
 
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LineCandidate {
+    Confirmed(usize),
+    Candidate(usize),
+}
+
 pub struct CompiledRegex {
     plan: SearchPlan,
 }
@@ -34,6 +41,26 @@ impl CompiledRegex {
             }
         };
         Self { plan }
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn find_candidate_line(&self, input: &str, at: usize) -> Option<LineCandidate> {
+        match &self.plan {
+            SearchPlan::Literal(search) => search.find_candidate_line(input, at),
+            SearchPlan::Automata(search) => search.find_candidate_line(input, at),
+            SearchPlan::Backreference(search) => search.find_candidate_line(input, at),
+        }
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn supports_candidate_lines(&self) -> bool {
+        match &self.plan {
+            SearchPlan::Literal(search) => search.supports_candidate_lines(),
+            SearchPlan::Automata(search) => search.supports_candidate_lines(),
+            SearchPlan::Backreference(search) => search.supports_candidate_lines(),
+        }
     }
 }
 

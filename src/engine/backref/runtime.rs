@@ -314,7 +314,7 @@ impl BackreferencePlan {
         let fast_path = self.fast_path.as_ref()?;
         match fast_path {
             FastPath::SingleCaptureLiteralBackref(fast_path) => {
-                self.find_single_capture_literal_backref(input, scan_start, &fast_path)
+                self.find_single_capture_literal_backref(input, scan_start, fast_path)
             }
             FastPath::TwoPartReplayBackref(fast_path) => {
                 self.find_two_part_replay_backref(input, scan_start, fast_path)
