@@ -85,11 +85,10 @@ cargo install cargo-flamegraph
 
 `fastgrep` is also expected on `PATH`. If your local install exposes it under a different binary name, set `FASTGREP_BIN=/path/to/that/binary` when running the benchmark script.
 
-Create the Python virtual environment and install plotting dependencies:
+Install plotting dependencies:
 
 ```sh
-uv venv
-uv pip install -r requirements.txt
+uv sync
 ```
 
 Generate all benchmark corpora:

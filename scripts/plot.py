@@ -65,7 +65,7 @@ def write_svg_plot(
         default_width, len(wrapped_labels) * 1.5, longest_label_line * 0.7
     )
     figure, axis = plt.subplots(
-        figsize=(figure_width, default_height), layout="constrained"
+        figsize=(figure_width, default_height * 1.5), layout="constrained"
     )
 
     base_positions = list(range(len(wrapped_labels)))
