@@ -2,7 +2,7 @@ use std::{hint::black_box, io, path::PathBuf};
 
 use anyhow::{bail, Result};
 use clap::{Parser, ValueEnum};
-use grep_rust::{
+use grep_rs::{
     compile_regex,
     search_runner::{run_search_to_writer, search_text_content, SearchConfig},
 };

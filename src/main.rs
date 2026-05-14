@@ -6,7 +6,7 @@ use std::{
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 
-use grep_rust::{
+use grep_rs::{
     compile_regex,
     search_runner::{run_search, SearchConfig},
 };

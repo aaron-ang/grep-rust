@@ -51,7 +51,7 @@ fn find_all_benches(c: &mut Criterion) {
             "token123-123456 and token123-123456",
         ),
     ] {
-        let compiled = grep_rust::compile_regex(pattern);
+        let compiled = grep_rs::compile_regex(pattern);
         group.bench_function(name, |b| {
             b.iter(|| common::bench_find_all_with_compiled(&compiled, input))
         });

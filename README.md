@@ -1,4 +1,4 @@
-# grep-rust
+# grep-rs
 
 A small `grep` implementation in Rust with a custom regex engine, recursive file search, only-match output, ANSI highlighting, and a benchmark workflow against `grep`, `ripgrep`, and `fastgrep`.
 

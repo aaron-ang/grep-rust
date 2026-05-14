@@ -7,9 +7,9 @@ fn search_pipeline_benches(c: &mut Criterion) {
     let data_path = common::fixture_path("data.txt");
     let tree_path = common::fixture_path("tree");
     let data_text = common::read_fixture("data.txt");
-    let literal_compiled = grep_rust::compile_regex("matched_line_[0123456789]+");
+    let literal_compiled = grep_rs::compile_regex("matched_line_[0123456789]+");
     let alternation_compiled =
-        grep_rust::compile_regex("message=(matched_line|ordinary_line)_[0123456789]+");
+        grep_rs::compile_regex("message=(matched_line|ordinary_line)_[0123456789]+");
 
     let mut group = c.benchmark_group("search_pipeline");
     group.bench_function("serial_file_search_literal_prefix", |b| {

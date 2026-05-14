@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use grep_rust::{
+use grep_rs::{
     search_runner::{run_search_to_writer, search_line_by_line, search_text_content, SearchConfig},
     CompiledRegex,
 };
